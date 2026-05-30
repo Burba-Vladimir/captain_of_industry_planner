@@ -48,11 +48,14 @@ CREATE TABLE IF NOT EXISTS building_construction (
 
 CREATE TABLE IF NOT EXISTS recipes (
     id           SERIAL  PRIMARY KEY,
+    wiki_id      TEXT,                    -- стабильный ID с вики (RecipeId из Cargo API)
     machine_id   INTEGER REFERENCES buildings (id) ON DELETE SET NULL,
     machine_name VARCHAR(200) NOT NULL,
     cycle_time_s NUMERIC(8, 2) CHECK (cycle_time_s > 0),
     deprecated   BOOLEAN NOT NULL DEFAULT FALSE
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_recipes_wiki_id ON recipes(wiki_id) WHERE wiki_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_recipes_machine_id   ON recipes (machine_id);
 CREATE INDEX IF NOT EXISTS idx_recipes_machine_name ON recipes (machine_name);
