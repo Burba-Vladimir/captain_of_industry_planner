@@ -201,7 +201,7 @@
       <div class="node-tile"
            :data-nid="node._id"
            :class="(node.node_type === 'complex' ? 'is-complex ' : '') + (selected[node._id] ? 'is-selected' : '')"
-           :style="`left:${node.pos_x}px; top:${node.pos_y}px`">
+           :style="`left:${nodePositions[node._id]?.x??node.pos_x}px; top:${nodePositions[node._id]?.y??node.pos_y}px`">
 
         <!-- Header (drag handle) -->
         <div class="node-header" @mousedown.prevent="startDrag($event, node)">
@@ -268,7 +268,7 @@
                 <span class="port-qty" x-text="fmtQty(inp.scaled)"></span>
               </div>
             </template>
-            <div x-show="scaledFlows(node,'input').length === 0"
+            <div x-show="!(node.inputs && node.inputs.length)"
                  class="text-xs text-slate-300 px-3 py-1">нет входов</div>
           </div>
 
@@ -287,7 +287,7 @@
                 <span class="port-qty" x-text="fmtQty(out.scaled)"></span>
               </div>
             </template>
-            <div x-show="scaledFlows(node,'output').length === 0"
+            <div x-show="!(node.outputs && node.outputs.length)"
                  class="text-xs text-slate-300 px-3 py-1 text-right">нет выходов</div>
           </div>
 
@@ -660,6 +660,15 @@ function complexEditor(complexId) {
     // Выделение узлов: {_id: true}
     selected: {},
 
+    // Позиции узлов — ОТДЕЛЬНЫЙ реактивный объект.
+    // Drag обновляет только nodePositions → Alpine пересчитывает только style+рёбра,
+    // не трогая scaledFlows/summary/portBalance.
+    // При mouseup позиции фиксируются обратно в this.nodes.
+    nodePositions: {},  // { _id: {x, y} }
+
+    // Кеш _idleEffectiveMap: действует один синхронный тик, потом сбрасывается
+    __idleMapCache: null,
+
     // Drag / pan / rubber-band
     _drag:       null,   // {offsets: [{_id, ox, oy}]}
     _pan:        null,   // {startX, startY} для прокрутки холста мышью
@@ -701,7 +710,8 @@ function complexEditor(complexId) {
           e.preventDefault(); e.returnValue = '';
         }
       });
-      this.$watch('nodes', () => { this._isDirty = true; });
+      this.$watch('nodes',     () => { this._isDirty = true; this.__idleMapCache = null; });
+      this.$watch('idleNodes', () => { this.__idleMapCache = null; });
       this.$watch('edges', () => { this._isDirty = true; });
       this.$watch('name',  () => { this._isDirty = true; });
     },
@@ -726,6 +736,8 @@ function complexEditor(complexId) {
           workers:       n.workers,
           electricity_kw: n.electricity_kw,
         }];
+        // Инициализируем nodePositions для первого узла
+        this.nodePositions = {[this.nodes[0]._id]: {x: 800, y: 300}};
       } catch(e) {
         this.error = e.message;
       }
@@ -765,6 +777,10 @@ function complexEditor(complexId) {
         this.idleNodes = idle;
         this.manualPartialNodes = manual;
         this.externalPorts = ext;
+        // Инициализируем nodePositions из загруженных позиций
+        const positions = {};
+        for (const n of this.nodes) positions[n._id] = {x: n.pos_x, y: n.pos_y};
+        this.nodePositions = positions;
         if (Object.keys(manual).length) this.nodes = [...this.nodes];
       } catch(e) {
         this.error = e.message;
@@ -883,6 +899,8 @@ function complexEditor(complexId) {
           electricity_kw: picked.electricity_kw,
         };
         this.nodes = [...this.nodes, target];
+        // Синхронизируем nodePositions для нового узла
+        this.nodePositions = {...this.nodePositions, [target._id]: {x: target.pos_x, y: target.pos_y}};
       }
 
       // Конкретное ребро для кликнутого ресурса
@@ -1209,10 +1227,13 @@ function complexEditor(complexId) {
           this._rafId = null;
           if (!this._drag) return;
           const mx = this._pendingMX, my = this._pendingMY;
-          const updates = {};
+          // Обновляем ТОЛЬКО nodePositions — не трогаем this.nodes.
+          // Alpine пересчитает только :style карточек и edgePaths (рёбра).
+          // scaledFlows, summary, portBalance НЕ пересчитываются — они зависят от this.nodes.
+          const newPos = {...this.nodePositions};
           for (const {_id, ox, oy} of this._drag.offsets)
-            updates[_id] = {pos_x: Math.max(10, mx - ox), pos_y: Math.max(10, my - oy)};
-          this.nodes = this.nodes.map(n => updates[n._id] ? {...n, ...updates[n._id]} : n);
+            newPos[_id] = {x: Math.max(10, mx - ox), y: Math.max(10, my - oy)};
+          this.nodePositions = newPos;
         });
       }
     },
@@ -1230,10 +1251,11 @@ function complexEditor(complexId) {
         for (const n of this.nodes) {
           const el = document.querySelector(`.node-tile[data-nid="${n._id}"]`);
           if (!el) continue;
-          const nx1 = n.pos_x;
-          const ny1 = n.pos_y;
-          const nx2 = n.pos_x + el.offsetWidth;
-          const ny2 = n.pos_y + el.offsetHeight;
+          const p   = this.nodePositions[n._id];
+          const nx1 = p ? p.x : n.pos_x;
+          const ny1 = p ? p.y : n.pos_y;
+          const nx2 = nx1 + el.offsetWidth;
+          const ny2 = ny1 + el.offsetHeight;
           if (nx1 >= x1 && ny1 >= y1 && nx2 <= x2 && ny2 <= y2) {
             toSelect[n._id] = true;
           }
@@ -1251,6 +1273,18 @@ function complexEditor(complexId) {
         }
         return;
       }
+      if (this._drag) {
+        // Зафиксировать финальные позиции из nodePositions обратно в this.nodes
+        // (одна перерисовка после drag — это нормально)
+        const pos = this.nodePositions;
+        const dragIds = new Set(this._drag.offsets.map(o => o._id));
+        if (dragIds.size > 0) {
+          this.nodes = this.nodes.map(n => {
+            if (!dragIds.has(n._id) || !pos[n._id]) return n;
+            return {...n, pos_x: pos[n._id].x, pos_y: pos[n._id].y};
+          });
+        }
+      }
       this._drag = null;
       this._pan  = null;
     },
@@ -1262,6 +1296,9 @@ function complexEditor(complexId) {
       this.edges = this.edges.filter(
         e => e.from_node_id !== node._id && e.to_node_id !== node._id
       );
+      // Убрать из nodePositions
+      const {[node._id]: _p, ...restPos} = this.nodePositions;
+      this.nodePositions = restPos;
       // Убрать из idleNodes / selected
       const {[node._id]: _i, ...restIdle} = this.idleNodes;
       this.idleNodes = restIdle;
@@ -1307,8 +1344,12 @@ function complexEditor(complexId) {
       const list = direction === 'output' ? (node.outputs || []) : (node.inputs || []);
       const idx  = list.findIndex(f => f.item === item);
       const i    = Math.max(0, idx);
-      const x    = direction === 'output' ? node.pos_x + PORT_CX_RIGHT : node.pos_x + PORT_CX_LEFT;
-      const y    = node.pos_y + HEADER_H + i * PORT_H + PORT_H / 2;
+      // Читаем позицию из nodePositions (обновляется при drag без изменения this.nodes)
+      const pos  = this.nodePositions[nodeId];
+      const px   = pos ? pos.x : node.pos_x;
+      const py   = pos ? pos.y : node.pos_y;
+      const x    = direction === 'output' ? px + PORT_CX_RIGHT : px + PORT_CX_LEFT;
+      const y    = py + HEADER_H + i * PORT_H + PORT_H / 2;
       return {x, y};
     },
 
@@ -1415,6 +1456,10 @@ function complexEditor(complexId) {
     // Итерации сходятся даже при взаимозависимых idle-узлах (например, когда
     // градирня и дистиллятор оба idle и конкурируют за пар).
     get _idleEffectiveMap() {
+      // Кеш: вычисляем один раз за синхронный тик (scaledFlows/summary вызывают его ~100 раз)
+      if (this.__idleMapCache !== null && this.__idleMapCache !== undefined) {
+        return this.__idleMapCache;
+      }
       // Начальные значения: номинальный count каждого узла
       const result = {};
       for (const n of this.nodes) result[n._id] = n.count || 1;
@@ -1465,6 +1510,8 @@ function complexEditor(complexId) {
 
         if (maxChange < 0.00005) break;
       }
+      // Сохранить в кеш; сбросится при изменении nodes/idleNodes (через $watch)
+      this.__idleMapCache = result;
       return result;
     },
 
@@ -1604,7 +1651,9 @@ function complexEditor(complexId) {
       for (let i = 0; i < 20; i++) {
         const hit = this.nodes.some(n => {
           if (n._id === excludeId) return false;
-          return Math.abs(n.pos_x - x) < W && Math.abs(n.pos_y - y) < H;
+          const p = this.nodePositions[n._id];
+          const nx = p ? p.x : n.pos_x, ny = p ? p.y : n.pos_y;
+          return Math.abs(nx - x) < W && Math.abs(ny - y) < H;
         });
         if (!hit) return {x, y};
         y += H;  // сдвиг вниз
@@ -1727,8 +1776,8 @@ function complexEditor(complexId) {
             count:             this.hasIdle(n) || this.isManualPartial(n)
                                  ? this.nodeIdleCount(n)
                                  : n.count,
-            pos_x:             n.pos_x,
-            pos_y:             n.pos_y,
+            pos_x:             this.nodePositions[n._id]?.x ?? n.pos_x,
+            pos_y:             this.nodePositions[n._id]?.y ?? n.pos_y,
             efficiency:        this.nodeEfficiency(n),
             idle_item:         this.idleNodes[n._id]?.item      || null,
             idle_direction:    this.idleNodes[n._id]?.direction || null,

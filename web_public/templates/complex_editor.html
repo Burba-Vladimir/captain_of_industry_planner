@@ -327,7 +327,7 @@
       <div class="node-tile"
            :data-nid="node._id"
            :class="(node.node_type==='complex'?'is-complex ':'')+(selected[node._id]?'is-selected':'')"
-           :style="`left:${node.pos_x}px; top:${node.pos_y}px`">
+           :style="`left:${nodePositions[node._id]?.x??node.pos_x}px; top:${nodePositions[node._id]?.y??node.pos_y}px`">
 
         <div class="node-header"
              @mousedown.prevent="readOnly || startDrag($event, node)">
@@ -386,7 +386,7 @@
                 <span class="port-qty" x-text="fmtQty(inp.scaled)"></span>
               </div>
             </template>
-            <div x-show="scaledFlows(node,'input').length===0"
+            <div x-show="!(node.inputs&&node.inputs.length)"
                  class="text-xs text-slate-300 dark:text-slate-600 px-3 py-1">{{ t('editor.no_inputs') }}</div>
           </div>
           <div class="ports-col outputs">
@@ -401,7 +401,7 @@
                 <span class="port-qty" x-text="fmtQty(out.scaled)"></span>
               </div>
             </template>
-            <div x-show="scaledFlows(node,'output').length===0"
+            <div x-show="!(node.outputs&&node.outputs.length)"
                  class="text-xs text-slate-300 dark:text-slate-600 px-3 py-1 text-right">{{ t('editor.no_outputs') }}</div>
           </div>
         </div>
@@ -756,6 +756,9 @@ function complexEditor(complexId, readOnlyMode) {
     manualPartialNodes: {},
     selected:           {},
 
+    nodePositions: {},   // { _id: {x, y} } — позиции вынесены отдельно, drag не трогает this.nodes
+    __idleMapCache: null,
+
     _drag:       null,
     _pan:        null,
     _rubberBand: null,
@@ -799,7 +802,8 @@ function complexEditor(complexId, readOnlyMode) {
         }
       });
       // Отслеживаем изменения
-      this.$watch('nodes', () => { this._isDirty = true; });
+      this.$watch('nodes',     () => { this._isDirty = true; this.__idleMapCache = null; });
+      this.$watch('idleNodes', () => { this.__idleMapCache = null; });
       this.$watch('edges', () => { this._isDirty = true; });
       this.$watch('name',  () => { this._isDirty = true; });
     },
@@ -833,6 +837,7 @@ function complexEditor(complexId, readOnlyMode) {
           workers:       n.workers,
           electricity_kw: n.electricity_kw,
         }];
+        this.nodePositions = {[this.nodes[0]._id]: {x: 800, y: 300}};
       } catch(e) { this.error = e.message; }
     },
 
@@ -871,6 +876,9 @@ function complexEditor(complexId, readOnlyMode) {
         this.idleNodes = idle;
         this.manualPartialNodes = manual;
         this.externalPorts = ext;
+        const positions={};
+        for (const n of this.nodes) positions[n._id]={x:n.pos_x,y:n.pos_y};
+        this.nodePositions = positions;
         if (Object.keys(manual).length) this.nodes = [...this.nodes];
       } catch(e) { this.error = e.message; }
       finally { this.loading = false; }
@@ -1022,6 +1030,7 @@ function complexEditor(complexId, readOnlyMode) {
           electricity_kw: picked.electricity_kw,
         };
         this.nodes = [...this.nodes, target];
+        this.nodePositions = {...this.nodePositions, [target._id]: {x: target.pos_x, y: target.pos_y}};
       }
 
       // ctx.node_id is null when picker was opened from the footer bar — skip explicit edge
@@ -1236,9 +1245,9 @@ function complexEditor(complexId, readOnlyMode) {
           this._rafId=null;
           if (!this._drag) return;
           const mx=this._pendingMX, my=this._pendingMY;
-          const updates={};
-          for (const {_id,ox,oy} of this._drag.offsets) updates[_id]={pos_x:Math.max(10,mx-ox),pos_y:Math.max(10,my-oy)};
-          this.nodes=this.nodes.map(n=>updates[n._id]?{...n,...updates[n._id]}:n);
+          const newPos={...this.nodePositions};
+          for (const {_id,ox,oy} of this._drag.offsets) newPos[_id]={x:Math.max(10,mx-ox),y:Math.max(10,my-oy)};
+          this.nodePositions=newPos;
         });
       }
     },
@@ -1252,7 +1261,8 @@ function complexEditor(complexId, readOnlyMode) {
         for (const n of this.nodes) {
           const el=document.querySelector(`.node-tile[data-nid="${n._id}"]`);
           if (!el) continue;
-          if (n.pos_x>=x1&&n.pos_y>=y1&&n.pos_x+el.offsetWidth<=x2&&n.pos_y+el.offsetHeight<=y2) toSelect[n._id]=true;
+          const p=this.nodePositions[n._id]; const nx=p?p.x:n.pos_x, ny=p?p.y:n.pos_y;
+          if (nx>=x1&&ny>=y1&&nx+el.offsetWidth<=x2&&ny+el.offsetHeight<=y2) toSelect[n._id]=true;
         }
         if (rb.additive) {
           const merged={...this.selected};
@@ -1260,6 +1270,11 @@ function complexEditor(complexId, readOnlyMode) {
           this.selected=merged;
         } else { this.selected=toSelect; }
         return;
+      }
+      if (this._drag) {
+        const pos=this.nodePositions, dragIds=new Set(this._drag.offsets.map(o=>o._id));
+        if (dragIds.size>0)
+          this.nodes=this.nodes.map(n=>(!dragIds.has(n._id)||!pos[n._id])?n:{...n,pos_x:pos[n._id].x,pos_y:pos[n._id].y});
       }
       this._drag=null; this._pan=null;
     },
@@ -1269,6 +1284,7 @@ function complexEditor(complexId, readOnlyMode) {
       if (this.readOnly || this.nodes.length<=1) return;
       this.nodes=this.nodes.filter(n=>n._id!==node._id);
       this.edges=this.edges.filter(e=>e.from_node_id!==node._id&&e.to_node_id!==node._id);
+      const {[node._id]:_p,...rp}=this.nodePositions; this.nodePositions=rp;
       const {[node._id]:_i,...ri}=this.idleNodes; this.idleNodes=ri;
       const {[node._id]:_s,...rs}=this.selected;  this.selected=rs;
     },
@@ -1304,8 +1320,10 @@ function complexEditor(complexId, readOnlyMode) {
       const node=this.nodes.find(n=>n._id===nodeId); if (!node) return {x:0,y:0};
       const list=direction==='output'?(node.outputs||[]):(node.inputs||[]);
       const i=Math.max(0,list.findIndex(f=>f.item===item));
-      const x=direction==='output'?node.pos_x+PORT_CX_RIGHT:node.pos_x+PORT_CX_LEFT;
-      const y=node.pos_y+HEADER_H+i*PORT_H+PORT_H/2;
+      const pos=this.nodePositions[nodeId];
+      const px=pos?pos.x:node.pos_x, py=pos?pos.y:node.pos_y;
+      const x=direction==='output'?px+PORT_CX_RIGHT:px+PORT_CX_LEFT;
+      const y=py+HEADER_H+i*PORT_H+PORT_H/2;
       return {x,y};
     },
 
@@ -1367,10 +1385,11 @@ function complexEditor(complexId, readOnlyMode) {
 
     /* ── Idle solver ────────────────────────────────────────────── */
     get _idleEffectiveMap() {
+      if (this.__idleMapCache!==null&&this.__idleMapCache!==undefined) return this.__idleMapCache;
       const result={};
       for (const n of this.nodes) result[n._id]=n.count||1;
       const portIdleList=this.nodes.filter(n=>this.idleNodes[n._id]);
-      if (portIdleList.length===0) return result;
+      if (portIdleList.length===0) { this.__idleMapCache=result; return result; }
       for (let iter=0;iter<60;iter++) {
         let maxChange=0;
         for (const node of portIdleList) {
@@ -1401,6 +1420,7 @@ function complexEditor(complexId, readOnlyMode) {
         }
         if (maxChange<0.00005) break;
       }
+      this.__idleMapCache=result;
       return result;
     },
 
@@ -1475,7 +1495,11 @@ function complexEditor(complexId, readOnlyMode) {
       const W=NODE_W+40, H=210;
       let x=idealX, y=idealY;
       for (let i=0;i<20;i++) {
-        const hit=this.nodes.some(n=>{ if (n._id===excludeId) return false; return Math.abs(n.pos_x-x)<W&&Math.abs(n.pos_y-y)<H; });
+        const hit=this.nodes.some(n=>{
+          if (n._id===excludeId) return false;
+          const p=this.nodePositions[n._id]; const nx=p?p.x:n.pos_x, ny=p?p.y:n.pos_y;
+          return Math.abs(nx-x)<W&&Math.abs(ny-y)<H;
+        });
         if (!hit) return {x,y};
         y+=H;
       }
@@ -1565,8 +1589,8 @@ function complexEditor(complexId, readOnlyMode) {
             node_type:         n.node_type,
             node_ref_id:       n.node_ref_id,
             count:             this.hasIdle(n)||this.isManualPartial(n)?this.nodeIdleCount(n):n.count,
-            pos_x:             n.pos_x,
-            pos_y:             n.pos_y,
+            pos_x:             this.nodePositions[n._id]?.x??n.pos_x,
+            pos_y:             this.nodePositions[n._id]?.y??n.pos_y,
             efficiency:        this.nodeEfficiency(n),
             idle_item:         this.idleNodes[n._id]?.item      ||null,
             idle_direction:    this.idleNodes[n._id]?.direction ||null,
