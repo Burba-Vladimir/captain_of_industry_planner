@@ -25,6 +25,12 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/coi_public
+      SECRET_KEY: test-secret-key-for-ci
+      FLASK_ENV: testing
+      PGPASSWORD: postgres
+
     steps:
       - uses: actions/checkout@v4
 
@@ -36,21 +42,11 @@ jobs:
           cache-dependency-path: web_public/requirements.txt
 
       - name: Install dependencies
-        run: |
-          pip install -r web_public/requirements.txt
-          pip install pytest pytest-cov
+        run: pip install -r web_public/requirements.txt pytest pytest-cov
 
       - name: Apply schema
-        run: |
-          psql postgresql://postgres:postgres@localhost:5432/coi_public -f web_public/sql/schema.sql
-        env:
-          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d coi_public -f web_public/sql/schema.sql
 
       - name: Run tests
-        run: |
-          cd web_public
-          python -m pytest tests/ -v --tb=short
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/coi_public
-          SECRET_KEY: test-secret-key-for-ci
-          FLASK_ENV: testing
+        working-directory: web_public
+        run: python -m pytest tests/ -v --tb=short --no-header
