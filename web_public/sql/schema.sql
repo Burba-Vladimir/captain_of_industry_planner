@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS complexes (
     id                   SERIAL       PRIMARY KEY,
     name                 VARCHAR(200) NOT NULL,
     description          TEXT,
+    deprecated           BOOLEAN      NOT NULL DEFAULT FALSE,
     total_workers        NUMERIC(12, 2),
     total_electricity_kw NUMERIC(12, 2),
     created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -207,7 +208,7 @@ BEGIN
     WITH RECURSIVE cx_tree AS (
         SELECT p_complex_id AS cid, 1.0::NUMERIC(12,4) AS eff_mult
         UNION ALL
-        SELECT cm.child_id, t.eff_mult * cm.multiplier
+        SELECT cm.child_id, (t.eff_mult * cm.multiplier)::NUMERIC(12,4)
         FROM cx_tree t JOIN complex_members cm ON cm.complex_id = t.cid WHERE cm.child_type = 1
     ),
     all_recipes AS (
@@ -229,7 +230,7 @@ BEGIN
     WITH RECURSIVE cx_tree AS (
         SELECT p_complex_id AS cid, 1.0::NUMERIC(12,4) AS eff_mult
         UNION ALL
-        SELECT cm.child_id, t.eff_mult * cm.multiplier
+        SELECT cm.child_id, (t.eff_mult * cm.multiplier)::NUMERIC(12,4)
         FROM cx_tree t JOIN complex_members cm ON cm.complex_id = t.cid WHERE cm.child_type = 1
     ),
     all_recipes AS (
@@ -249,7 +250,7 @@ BEGIN
     WITH RECURSIVE cx_tree AS (
         SELECT p_complex_id AS cid, 1.0::NUMERIC(12,4) AS eff_mult
         UNION ALL
-        SELECT cm.child_id, t.eff_mult * cm.multiplier
+        SELECT cm.child_id, (t.eff_mult * cm.multiplier)::NUMERIC(12,4)
         FROM cx_tree t JOIN complex_members cm ON cm.complex_id = t.cid WHERE cm.child_type = 1
     ),
     all_recipes AS (
