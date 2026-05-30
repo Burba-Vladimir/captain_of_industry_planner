@@ -746,22 +746,25 @@ function complexEditor(complexId) {
           from_node_id: idMap[e.from_member_id],
           to_node_id:   idMap[e.to_member_id],
         }));
-        // Восстановить idleNodes и manualPartialNodes из загруженных данных
-        const idle = {}, manual = {};
+        // Восстановить idleNodes, manualPartialNodes и externalPorts из загруженных данных
+        const idle = {}, manual = {}, ext = {};
         for (const n of this.nodes) {
           if (n.idle_item && n.idle_direction) {
             idle[n._id] = {item: n.idle_item, direction: n.idle_direction};
           }
           if (n.is_manual_partial) {
             manual[n._id] = true;
-            // Восстановить дробный count = multiplier × efficiency
             const frac = (n.count || 1) * (n.efficiency || 1);
             const idx2 = this.nodes.findIndex(m => m._id === n._id);
             if (idx2 !== -1) this.nodes[idx2] = {...this.nodes[idx2], count: Math.round(frac * 100) / 100};
           }
+          for (const ep of (n.external_ports || [])) {
+            ext[`${n._id}:${ep.item}:${ep.direction}`] = true;
+          }
         }
         this.idleNodes = idle;
         this.manualPartialNodes = manual;
+        this.externalPorts = ext;
         if (Object.keys(manual).length) this.nodes = [...this.nodes];
       } catch(e) {
         this.error = e.message;
@@ -1099,13 +1102,12 @@ function complexEditor(complexId) {
       let minRef = 1;
       for (const r of Object.values(ratios)) minRef = lcmInt(minRef, r.den);
 
-      // Применить новые значения
+      // Применить все новые значения атомарно (одно присваивание → один рендер Alpine)
+      const updates = {};
       for (const [nid, r] of Object.entries(ratios)) {
-        const newCount = (minRef / r.den) * r.num;
-        const i = this.nodes.findIndex(n => n._id === nid);
-        if (i !== -1) this.nodes[i] = {...this.nodes[i], count: Math.max(1, newCount)};
+        updates[nid] = Math.max(1, (minRef / r.den) * r.num);
       }
-      this.nodes = [...this.nodes];
+      this.nodes = this.nodes.map(n => n._id in updates ? {...n, count: updates[n._id]} : n);
     },
 
     /* ── Canvas pan / rubber-band ────────────────────────────── */
@@ -1703,22 +1705,6 @@ function complexEditor(complexId) {
     save(exitAfter=false) {
       if (!this.name.trim()) return;
       this._exitAfterSave = exitAfter;
-      const unconnected = new Set();
-      for (const node of this.nodes) {
-        for (const o of (node.outputs || []))
-          if (!this.isPortExternal(node, o.item, 'output') &&
-              !this.edges.some(e => e.from_node_id === node._id && e.resource_item === o.item))
-            unconnected.add(o.item);
-        for (const i of (node.inputs  || []))
-          if (!this.isPortExternal(node, i.item, 'input') &&
-              !this.edges.some(e => e.to_node_id   === node._id && e.resource_item === i.item))
-            unconnected.add(i.item);
-      }
-      if (unconnected.size > 0) {
-        this.dangling     = [...unconnected].sort((a, b) => a.localeCompare(b, 'ru'));
-        this.showDangling = true;
-        return;
-      }
       this.doSave();
     },
 
@@ -1742,6 +1728,12 @@ function complexEditor(complexId) {
             idle_item:         this.idleNodes[n._id]?.item      || null,
             idle_direction:    this.idleNodes[n._id]?.direction || null,
             is_manual_partial: this.isManualPartial(n),
+            external_ports:    Object.entries(this.externalPorts)
+              .filter(([k, v]) => v && k.startsWith(n._id + ':'))
+              .map(([k]) => {
+                const parts = k.split(':');
+                return {item: parts.slice(1, -1).join(':'), direction: parts[parts.length - 1]};
+              }),
           })),
           edges: this.edges.map(e => ({
             from_node_id:  e.from_node_id,

@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS complex_members (
     idle_item        TEXT,
     idle_direction   SMALLINT,
     is_manual_partial BOOLEAN NOT NULL DEFAULT FALSE,
+    external_ports   TEXT,            -- JSON-массив [{item, direction}] — явно помеченные внешние порты
     CONSTRAINT chk_member_refs CHECK (
         (child_type = 0
             AND recipe_id        IS NOT NULL AND recipe_id        = child_id AND child_complex_id IS NULL)

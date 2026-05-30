@@ -918,6 +918,7 @@ def api_complex_graph(complex_id: int):
                         cm.id, cm.child_type, cm.child_id,
                         cm.multiplier, cm.pos_x, cm.pos_y,
                         cm.efficiency, cm.idle_item, cm.idle_direction, cm.is_manual_partial,
+                        cm.external_ports,
                         r.machine_name,
                         b.workers, b.electricity_kw,
                         c2.name  AS complex_name,
@@ -1013,6 +1014,7 @@ def api_complex_graph(complex_id: int):
                 "idle_item":         m["idle_item"],
                 "idle_direction":    m["idle_direction"],
                 "is_manual_partial": bool(m["is_manual_partial"]),
+                "external_ports":    json.loads(m["external_ports"]) if m.get("external_ports") else [],
                 "label":            m["machine_name"] or m["complex_name"] or "?",
                 "node_ref_slug":    str(m["complex_slug"]) if m.get("complex_slug") else None,
                 "workers":          _f(m["workers"]) if m["workers"] is not None else None,
@@ -1089,13 +1091,16 @@ def _save_complex_graph(con, complex_id, data, user_id: int | None):
             efficiency        = max(0.0001, min(1.0, float(nd.get("efficiency", 1.0))))
             idle_item         = nd.get("idle_item") or None
             idle_direction    = nd.get("idle_direction") or None
+            ext_ports_raw     = nd.get("external_ports") or []
+            external_ports    = json.dumps(ext_ports_raw) if ext_ports_raw else None
 
             cur.execute("""
                 INSERT INTO complex_members
                     (complex_id, child_type, child_id,
                      recipe_id, child_complex_id, multiplier, pos_x, pos_y,
-                     efficiency, idle_item, idle_direction, is_manual_partial)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     efficiency, idle_item, idle_direction, is_manual_partial,
+                     external_ports)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 complex_id, child_type, ref_id,
@@ -1103,6 +1108,7 @@ def _save_complex_graph(con, complex_id, data, user_id: int | None):
                 ref_id if child_type == 1 else None,
                 count, pos_x, pos_y,
                 efficiency, idle_item, idle_direction, is_manual_partial,
+                external_ports,
             ))
             db_id = cur.fetchone()[0]
             id_map[nd["_id"]] = db_id
