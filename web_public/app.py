@@ -239,14 +239,9 @@ def toggle_hidden(node_type: str, node_id: int):
                 """, (user_id, node_id, hidden))
             con.commit()
     else:
-        # Комплекс: только владелец может скрывать
-        with get_db() as con:
-            with con.cursor() as cur:
-                cur.execute(
-                    "UPDATE complexes SET deprecated = %s WHERE id = %s AND user_id = %s",
-                    (hidden, node_id, user_id),
-                )
-            con.commit()
+        # Комплексы не имеют поля deprecated — скрытие через удаление из Browse
+        # (комплекс виден только владельцу, поэтому отдельный hide не нужен)
+        pass
     return jsonify({"ok": True})
 
 
@@ -271,11 +266,7 @@ def batch_hidden():
                     VALUES (%s, %s, %s)
                     ON CONFLICT (user_id, recipe_id) DO UPDATE SET hidden = EXCLUDED.hidden
                 """, (user_id, rid, hidden))
-            if complex_ids:
-                cur.execute(
-                    "UPDATE complexes SET deprecated = %s WHERE id = ANY(%s) AND user_id = %s",
-                    (hidden, complex_ids, user_id),
-                )
+            # Комплексы не имеют поля deprecated — batch hide только для рецептов
         con.commit()
     return jsonify({"ok": True})
 
@@ -356,7 +347,7 @@ SELECT * FROM (
         NULL                            AS cycle_time_s,
         c.total_workers                 AS workers,
         c.total_electricity_kw          AS electricity_kw,
-        c.deprecated,
+        FALSE                           AS deprecated,
         inp.items                       AS inputs,
         out.items                       AS outputs,
         mnt_cx.items                    AS maintenance,

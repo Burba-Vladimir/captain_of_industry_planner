@@ -65,7 +65,6 @@ CREATE TABLE IF NOT EXISTS complexes (
     id                   SERIAL       PRIMARY KEY,
     name                 VARCHAR(200) NOT NULL,
     description          TEXT,
-    deprecated           BOOLEAN      NOT NULL DEFAULT FALSE,
     total_workers        NUMERIC(12, 2),
     total_electricity_kw NUMERIC(12, 2),
     created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
