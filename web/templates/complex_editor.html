@@ -1102,12 +1102,13 @@ function complexEditor(complexId) {
       let minRef = 1;
       for (const r of Object.values(ratios)) minRef = lcmInt(minRef, r.den);
 
-      // Применить все новые значения атомарно (одно присваивание → один рендер Alpine)
-      const updates = {};
+      // Применить новые значения
       for (const [nid, r] of Object.entries(ratios)) {
-        updates[nid] = Math.max(1, (minRef / r.den) * r.num);
+        const newCount = (minRef / r.den) * r.num;
+        const i = this.nodes.findIndex(n => n._id === nid);
+        if (i !== -1) this.nodes[i] = {...this.nodes[i], count: Math.max(1, newCount)};
       }
-      this.nodes = this.nodes.map(n => n._id in updates ? {...n, count: updates[n._id]} : n);
+      this.nodes = [...this.nodes];
     },
 
     /* ── Canvas pan / rubber-band ────────────────────────────── */
@@ -1678,8 +1679,12 @@ function complexEditor(complexId) {
 
     scaledFlows(node, direction) {
       const edges = this.edges; // отслеживаем edges → x-for перерисовывается при изменении рёбер
-      const list  = direction === 'input' ? (node.inputs || []) : (node.outputs || []);
-      const m     = this.nodeEffectiveCount(node);
+      // Берём АКТУАЛЬНЫЙ объект узла из this.nodes, а не параметр из x-for:
+      // при патче (не пересоздании) внешнего x-for Alpine передаёт старый объект node,
+      // поэтому node.count может быть устаревшим. Поиск по _id гарантирует свежие данные.
+      const currentNode = this.nodes.find(n => n._id === node._id) || node;
+      const list  = direction === 'input' ? (currentNode.inputs || []) : (currentNode.outputs || []);
+      const m     = this.nodeEffectiveCount(currentNode);
       return list.map(f => ({
         ...f,
         // Флаг connected используется только для обеспечения реактивности x-for:

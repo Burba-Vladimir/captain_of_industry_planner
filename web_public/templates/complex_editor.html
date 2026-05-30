@@ -1171,9 +1171,12 @@ function complexEditor(complexId, readOnlyMode) {
       }
       let minRef=1;
       for (const r of Object.values(ratios)) minRef=lcmInt(minRef,r.den);
-      const updates={};
-      for (const [nid,r] of Object.entries(ratios)) updates[nid]=Math.max(1,(minRef/r.den)*r.num);
-      this.nodes=this.nodes.map(n=>n._id in updates?{...n,count:updates[n._id]}:n);
+      for (const [nid,r] of Object.entries(ratios)) {
+        const newCount=(minRef/r.den)*r.num;
+        const i=this.nodes.findIndex(n=>n._id===nid);
+        if (i!==-1) this.nodes[i]={...this.nodes[i],count:Math.max(1,newCount)};
+      }
+      this.nodes=[...this.nodes];
     },
 
     /* ── Canvas ─────────────────────────────────────────────────── */
@@ -1524,8 +1527,11 @@ function complexEditor(complexId, readOnlyMode) {
 
     scaledFlows(node, direction) {
       const edges=this.edges;
-      const list=direction==='input'?(node.inputs||[]):(node.outputs||[]);
-      const m=this.nodeEffectiveCount(node);
+      // Берём актуальный узел из this.nodes — параметр node из внешнего x-for может быть
+      // устаревшим при патче (Alpine не пересоздаёт DOM при смене count через _minimizeLcm)
+      const currentNode=this.nodes.find(n=>n._id===node._id)||node;
+      const list=direction==='input'?(currentNode.inputs||[]):(currentNode.outputs||[]);
+      const m=this.nodeEffectiveCount(currentNode);
       return list.map(f=>({
         ...f,
         _connected: edges.some(e=>direction==='input'?e.to_node_id===node._id&&e.resource_item===f.item:e.from_node_id===node._id&&e.resource_item===f.item),
