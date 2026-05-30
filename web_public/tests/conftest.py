@@ -65,7 +65,9 @@ def seed_game_data(db_conn):
     yield
     # Cleanup (в обратном порядке из-за FK)
     with db_conn.cursor() as cur:
-        cur.execute("DELETE FROM resource_flows WHERE recipe_id = 9001")
+        # Удаляем ВСЕ resource_flows с нашими тестовыми items —
+        # в т.ч. parent_type=1 (комплексные потоки от recalculate_complex)
+        cur.execute("DELETE FROM resource_flows WHERE item_id IN (9001, 9002)")
         cur.execute("DELETE FROM recipes WHERE id = 9001")
         cur.execute("DELETE FROM items WHERE id IN (9001, 9002)")
         cur.execute("DELETE FROM buildings WHERE id = 9001")
