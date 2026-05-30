@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Captain of Industry calculator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .chip { display:inline-flex; align-items:center; padding: 1px 7px;
+            border-radius: 999px; font-size: .72rem; font-weight: 500; white-space:nowrap; }
+    tbody tr { transition: background .1s; }
+    .item-icon { display:inline-flex; align-items:center; gap:2px; }
+    .item-icon img { width:20px; height:20px; object-fit:contain; }
+    .item-icon .item-label { display:none; }
+    .item-icon.no-img img  { display:none; }
+    .item-icon.no-img .item-label { display:inline; }
+    th.sortable { cursor:pointer; user-select:none; }
+    th.sortable:hover { background:#f1f5f9; }
+    /* Скрываем нативный крестик браузера у поля type=search — используем свой */
+    input[type=search]::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+    input[type=search]::-ms-clear { display: none; }
+  </style>
+</head>
+
+<body class="bg-slate-100 min-h-screen text-slate-800"
+      x-data="app()" x-init="load()" x-cloak>
+
+<!-- ═══════════ HEADER ═══════════ -->
+<header class="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-20">
+  <div class="max-w-screen-xl mx-auto px-4 py-2.5 flex flex-wrap items-center gap-3">
+
+    <span class="text-base font-bold tracking-tight text-slate-700 shrink-0">
+      ⚙ Captain of Industry calculator
+    </span>
+
+
+
+    <!-- Search -->
+    <div class="flex-1 min-w-44 relative">
+      <input type="search"
+             x-model.debounce.250="q"
+             placeholder='Поиск по машине, предмету… ("текст" — точное совпадение)'
+             :class="isExactSearch()
+               ? 'border-violet-400 ring-2 ring-violet-200 font-mono'
+               : 'border-slate-300 focus:ring-2 focus:ring-blue-400'"
+             class="w-full px-3 py-1.5 pr-7 rounded-lg border
+                    text-sm focus:outline-none bg-white transition-all">
+      <button x-show="q" @click="q=''"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">✕</button>
+    </div>
+
+    <!-- Type tabs -->
+    <div class="flex rounded-lg border border-slate-300 text-sm overflow-hidden shrink-0">
+      <template x-for="t in [{v:'all',l:'Все'},{v:'recipe',l:'Рецепты'},{v:'complex',l:'Комплексы'}]" :key="t.v">
+        <button @click="type=t.v"
+                :class="type===t.v ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'"
+                class="px-3 py-1.5 transition-colors" x-text="t.l"></button>
+      </template>
+    </div>
+
+    <!-- Hidden toggle -->
+    <label class="flex items-center gap-1.5 text-sm text-slate-500 cursor-pointer shrink-0 select-none">
+      <input type="checkbox" x-model="showHidden" class="rounded accent-blue-500">
+      Скрытые
+    </label>
+
+    <!-- Count -->
+    <span class="ml-auto text-xs text-slate-400 shrink-0"
+          x-text="sorted.length + ' / ' + nodes.length + ' записей'"></span>
+  </div>
+</header>
+
+<!-- ═══════════ MAIN ═══════════ -->
+<main class="max-w-screen-xl mx-auto px-4 py-5 pb-24">
+
+  <div x-show="loading" class="flex flex-col items-center justify-center py-24 text-slate-400">
+    <div class="text-5xl mb-3 animate-spin">⚙</div>
+    <p class="text-sm">Загрузка…</p>
+  </div>
+
+  <div x-show="error"
+       class="bg-red-50 border border-red-200 rounded-xl p-5 text-red-700 text-sm font-mono"
+       x-text="error"></div>
+
+  <div x-show="!loading && !error"
+       class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
+    <table class="w-full text-sm border-collapse">
+
+      <thead>
+        <tr class="bg-slate-50 text-slate-500 text-left text-xs uppercase tracking-wide border-b border-slate-200">
+          <!-- checkbox select-all -->
+          <th class="px-3 py-2.5 w-8">
+            <input type="checkbox"
+                   class="rounded accent-blue-500 cursor-pointer"
+                   :checked="allSelected"
+                   :indeterminate.prop="someSelected && !allSelected"
+                   @click.stop
+                   @change="toggleSelectAll($event.target.checked)">
+          </th>
+          <!-- expand indicator — not sortable -->
+          <th class="px-2 py-2.5 w-6"></th>
+          <!-- sortable columns -->
+          <th class="px-4 py-2.5 sortable" @click="sortBy('name')">
+            Машина / Комплекс <span class="text-slate-300 normal-case" x-text="sortIcon('name')"></span>
+          </th>
+          <th class="px-4 py-2.5 text-right w-20 sortable" @click="sortBy('workers')">
+            👷 <span class="text-slate-300 normal-case" x-text="sortIcon('workers')"></span>
+          </th>
+          <th class="px-4 py-2.5 text-right w-24 sortable" @click="sortBy('electricity')">
+            ⚡ кВт <span class="text-slate-300 normal-case" x-text="sortIcon('electricity')"></span>
+          </th>
+          <th class="px-4 py-2.5 w-36 sortable" @click="sortBy('maintenance')">
+            🔧 Обслуж. <span class="text-slate-300 normal-case" x-text="sortIcon('maintenance')"></span>
+          </th>
+          <th class="px-4 py-2.5 w-52">Входящие</th>
+          <th class="px-4 py-2.5 w-52">Исходящие</th>
+          <th class="px-3 py-2.5 w-10"></th>
+        </tr>
+      </thead>
+
+      <template x-for="(node, i) in sorted" :key="node.node_type + ':' + node.node_id">
+        <tbody :class="[node.deprecated ? 'opacity-40' : '', i%2===0 ? 'bg-white' : 'bg-slate-50/60']">
+
+          <!-- ── Main row ── -->
+          <tr @click="toggle(node)"
+              class="border-b border-slate-100 cursor-pointer hover:bg-blue-50/50">
+
+            <!-- checkbox (.stop prevents row expand) -->
+            <td class="px-3 py-2" @click.stop>
+              <input type="checkbox" class="rounded accent-blue-500 cursor-pointer"
+                     :checked="isSelected(node)"
+                     @change="toggleSelect(node)">
+            </td>
+
+            <!-- expand arrow -->
+            <td class="px-2 py-2 text-slate-300 text-xs select-none"
+                x-text="node._open ? '▼' : '▶'"></td>
+
+            <!-- name -->
+            <td class="px-4 py-2.5">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span :class="node.node_type==='recipe' ? 'bg-blue-100 text-blue-700' : 'bg-violet-100 text-violet-700'"
+                      class="chip"
+                      :title="node.node_type==='recipe' ? 'рецепт' : 'комплекс'"
+                      x-html="node.node_type==='recipe' ? _ICON_RECIPE : _ICON_COMPLEX"></span>
+                <span class="font-medium cursor-pointer hover:text-blue-600 transition-colors"
+                      @click.stop="searchExact(node.machine_name ?? node.name)"
+                      :title="'Найти: ' + (node.machine_name ?? node.name)"
+                      x-text="node.machine_name ?? node.name"></span>
+                <span x-show="node.deprecated" class="chip bg-slate-100 text-slate-400">скрытый</span>
+              </div>
+            </td>
+
+            <!-- workers -->
+            <td class="px-4 py-2 text-right text-slate-500">
+              <span x-show="node.workers > 0" x-text="node.workers"></span>
+              <span x-show="!(node.workers > 0)" class="text-slate-200">—</span>
+            </td>
+
+            <!-- electricity -->
+            <td class="px-4 py-2 text-right tabular-nums">
+              <span x-show="!node.electricity_kw" class="text-slate-200">—</span>
+              <span x-show="node.electricity_kw < 0" class="text-emerald-600 font-medium"
+                    x-text="Math.abs(node.electricity_kw)"></span>
+              <span x-show="node.electricity_kw > 0" class="text-orange-500"
+                    x-text="node.electricity_kw"></span>
+            </td>
+
+            <!-- maintenance -->
+            <td class="px-4 py-2">
+              <div class="flex flex-col gap-0.5">
+                <template x-for="m in node.maintenance" :key="m.item">
+                  <span class="inline-flex items-center gap-1" :title="m.item">
+                    <span class="item-icon">
+                      <img :src="iconOf(m.item)"
+                           @error="$el.parentElement.classList.add('no-img')"
+                           loading="lazy">
+                      <span class="item-label chip bg-amber-50 text-amber-700 border border-amber-100"
+                            x-text="m.item"></span>
+                    </span>
+                    <span class="text-xs tabular-nums text-slate-500 font-medium"
+                          x-text="m.rate_per_min"></span>
+                  </span>
+                </template>
+                <span x-show="node.maintenance.length === 0" class="text-slate-200 text-xs">—</span>
+              </div>
+            </td>
+
+            <!-- inputs -->
+            <td class="px-4 py-2">
+              <div class="flex flex-wrap gap-x-2 gap-y-1">
+                <template x-for="it in node.inputs" :key="it.item">
+                  <span class="inline-flex items-center gap-0.5 cursor-pointer hover:opacity-70 transition-opacity"
+                        :title="it.item" @click.stop="searchExact(it.item)">
+                    <span class="item-icon">
+                      <img :src="iconOf(it.item)"
+                           @error="$el.parentElement.classList.add('no-img')"
+                           loading="lazy">
+                      <span class="item-label chip bg-red-50 text-red-700 border border-red-100"
+                            x-text="it.item"></span>
+                    </span>
+                    <span x-show="it.qty_per_min != null"
+                          class="text-xs tabular-nums text-slate-500 font-medium"
+                          x-text="it.qty_per_min"></span>
+                  </span>
+                </template>
+                <span x-show="node.inputs.length === 0" class="text-slate-200 text-xs">—</span>
+              </div>
+            </td>
+
+            <!-- outputs -->
+            <td class="px-4 py-2">
+              <div class="flex flex-wrap gap-x-2 gap-y-1">
+                <template x-for="it in node.outputs" :key="it.item">
+                  <span class="inline-flex items-center gap-0.5 cursor-pointer hover:opacity-70 transition-opacity"
+                        :title="it.item" @click.stop="searchExact(it.item)">
+                    <span class="item-icon">
+                      <img :src="iconOf(it.item)"
+                           @error="$el.parentElement.classList.add('no-img')"
+                           loading="lazy">
+                      <span class="item-label chip bg-emerald-50 text-emerald-700 border border-emerald-100"
+                            x-text="it.item"></span>
+                    </span>
+                    <span x-show="it.qty_per_min != null"
+                          class="text-xs tabular-nums text-slate-500 font-medium"
+                          x-text="it.qty_per_min"></span>
+                  </span>
+                </template>
+                <span x-show="node.outputs.length === 0" class="text-slate-200 text-xs">—</span>
+              </div>
+            </td>
+
+            <!-- eye + complex + edit buttons (.stop prevents row expand) -->
+            <td class="px-2 py-2 text-center whitespace-nowrap" @click.stop>
+              <!-- Создать комплекс на основе рецепта -->
+              <a x-show="node.node_type === 'recipe'"
+                 :href="'/complex/new?from_type=recipe&from_id=' + node.node_id"
+                 class="inline-flex items-center justify-center w-6 h-6 leading-none opacity-30 hover:opacity-80
+                        hover:scale-110 transition-all mr-1 text-slate-600"
+                 title="Создать комплекс на основе этого рецепта">
+                <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4">
+                  <circle cx="3"  cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+                  <circle cx="17" cy="4"  r="2.5" stroke="currentColor" stroke-width="1.5"/>
+                  <circle cx="17" cy="16" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+                  <line x1="5.3" y1="9.0" x2="14.7" y2="4.9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                  <line x1="5.3" y1="11.0" x2="14.7" y2="15.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                </svg>
+              </a>
+              <!-- Создать комплекс на основе этого комплекса (как подкомплекс) -->
+              <a x-show="node.node_type === 'complex'"
+                 :href="'/complex/new?from_type=complex&from_id=' + node.node_id"
+                 class="inline-flex items-center justify-center w-6 h-6 leading-none opacity-30 hover:opacity-80
+                        hover:scale-110 transition-all mr-1 text-slate-600"
+                 title="Создать новый комплекс с этим в качестве основы">
+                <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4">
+                  <circle cx="3"  cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+                  <circle cx="17" cy="4"  r="2.5" stroke="currentColor" stroke-width="1.5"/>
+                  <circle cx="17" cy="16" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+                  <line x1="5.3" y1="9.0" x2="14.7" y2="4.9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                  <line x1="5.3" y1="11.0" x2="14.7" y2="15.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                </svg>
+              </a>
+              <!-- Редактировать существующий комплекс -->
+              <a x-show="node.node_type === 'complex'"
+                 :href="'/complex/' + node.node_id + '/edit'"
+                 class="inline-block text-sm leading-none opacity-30 hover:opacity-80
+                        hover:scale-110 transition-all mr-1"
+                 title="Редактировать комплекс">✏️</a>
+              <!-- Удалить комплекс -->
+              <button x-show="node.node_type === 'complex'"
+                      @click="askDelete(node)"
+                      class="text-sm leading-none opacity-20 hover:opacity-80 hover:text-red-500
+                             hover:scale-110 transition-all mr-1"
+                      title="Удалить комплекс">🗑</button>
+              <!-- Скрыть / показать -->
+              <button @click="toggleHidden(node)"
+                      :title="node.deprecated ? 'Показать' : 'Скрыть'"
+                      class="text-base leading-none hover:scale-110 transition-transform"
+                      :class="node.deprecated ? 'opacity-30 hover:opacity-70' : 'opacity-50 hover:opacity-100'">
+                <span x-text="node.deprecated ? '🙈' : '👁'"></span>
+              </button>
+            </td>
+          </tr>
+
+          <!-- ── Expanded detail ── -->
+          <tr x-show="node._open"
+              class="border-b border-slate-200">
+            <td colspan="2"></td>
+            <td colspan="7" class="px-6 pt-1 pb-4">
+              <div class="grid grid-cols-1 sm:grid-cols-4 gap-5 mt-1">
+
+                <!-- Meta (рецепт) / Состав (комплекс) -->
+                <div>
+                  <!-- Рецепт: стандартная мета -->
+                  <template x-if="node.node_type === 'recipe'">
+                    <div class="text-xs text-slate-500 space-y-1">
+                      <p x-show="node.cycle_time_s">
+                        ⏱ Цикл: <b class="text-slate-700" x-text="node.cycle_time_s + ' с'"></b>
+                      </p>
+                      <p>🏭 <span x-text="node.machine_name"></span></p>
+                      <p x-show="node.workers > 0">
+                        👷 <span x-text="node.workers + ' раб.'"></span>
+                      </p>
+                      <p x-show="node.electricity_kw && node.electricity_kw !== 0">
+                        ⚡ <span :class="node.electricity_kw < 0 ? 'text-emerald-600' : 'text-orange-500'"
+                                 x-text="Math.abs(node.electricity_kw) + ' кВт'"></span>
+                      </p>
+                    </div>
+                  </template>
+
+                  <!-- Комплекс: список машин -->
+                  <template x-if="node.node_type === 'complex'">
+                    <div>
+                      <p class="text-xs font-semibold text-violet-600 mb-1.5 uppercase tracking-wide">Состав</p>
+                      <div x-show="!node._members" class="text-xs text-slate-300">Загрузка…</div>
+                      <div class="space-y-0.5">
+                        <template x-for="m in (node._members || [])" :key="m.label + ':' + m.count">
+                          <div class="flex items-center justify-between text-xs gap-2">
+                            <span class="flex items-center gap-1.5">
+                              <span class="tabular-nums font-bold text-slate-500 min-w-[1.5rem] text-right"
+                                    x-text="m.count + '×'"></span>
+                              <span class="text-slate-700" x-text="m.label"></span>
+                              <span x-show="m.efficiency < 0.999"
+                                    class="text-violet-500 text-xs"
+                                    x-text="'⏸' + Math.round(m.efficiency*100) + '%'"></span>
+                            </span>
+                            <span class="shrink-0 text-slate-400 flex items-center gap-1.5">
+                              <span x-show="m.workers > 0" x-text="'👷' + Math.round(m.workers * m.count)"></span>
+                              <span x-show="m.electricity_kw"
+                                    :class="m.electricity_kw < 0 ? 'text-emerald-500' : 'text-orange-400'"
+                                    x-text="'⚡' + Math.abs(+(m.electricity_kw*m.count*m.efficiency).toFixed(1))"></span>
+                            </span>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+
+                <!-- Техобслуживание -->
+                <div x-show="node.maintenance && node.maintenance.length > 0">
+                  <p class="text-xs font-semibold text-amber-600 mb-1.5 uppercase tracking-wide">Обслуживание</p>
+                  <div class="space-y-1">
+                    <template x-for="m in (node.maintenance||[])" :key="m.item">
+                      <div class="flex justify-between text-xs gap-4">
+                        <span class="flex items-center gap-1.5">
+                          <img :src="iconOf(m.item)" @error="$el.style.display='none'"
+                               class="w-4 h-4 object-contain shrink-0" loading="lazy">
+                          <span x-text="m.item"></span>
+                        </span>
+                        <span class="tabular-nums shrink-0 text-slate-400" x-text="m.rate_per_min + '/мин'"></span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+
+                <!-- Full inputs -->
+                <div x-show="node.inputs.length > 0">
+                  <p class="text-xs font-semibold text-red-600 mb-1.5 uppercase tracking-wide">Входящие</p>
+                  <div class="space-y-1">
+                    <template x-for="it in node.inputs" :key="it.item">
+                      <div class="flex justify-between text-xs gap-4 cursor-pointer hover:text-blue-600 transition-colors group"
+                           @click="searchExact(it.item)">
+                        <span class="flex items-center gap-1.5">
+                          <img :src="iconOf(it.item)" @error="$el.style.display='none'"
+                               class="w-4 h-4 object-contain shrink-0" loading="lazy">
+                          <span x-text="it.item"></span>
+                        </span>
+                        <span class="tabular-nums shrink-0 text-slate-400 group-hover:text-blue-400">
+                          <span x-show="it.qty_per_cycle != null" x-text="it.qty_per_cycle + '/ц · '"></span><span
+                                x-show="it.qty_per_min != null"   x-text="it.qty_per_min + '/мин'"></span>
+                        </span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+
+                <!-- Full outputs -->
+                <div x-show="node.outputs.length > 0">
+                  <p class="text-xs font-semibold text-emerald-600 mb-1.5 uppercase tracking-wide">Исходящие</p>
+                  <div class="space-y-1">
+                    <template x-for="it in node.outputs" :key="it.item">
+                      <div class="flex justify-between text-xs gap-4 cursor-pointer hover:text-blue-600 transition-colors group"
+                           @click="searchExact(it.item)">
+                        <span class="flex items-center gap-1.5">
+                          <img :src="iconOf(it.item)" @error="$el.style.display='none'"
+                               class="w-4 h-4 object-contain shrink-0" loading="lazy">
+                          <span x-text="it.item"></span>
+                        </span>
+                        <span class="tabular-nums shrink-0 text-slate-400 group-hover:text-blue-400">
+                          <span x-show="it.qty_per_cycle != null" x-text="it.qty_per_cycle + '/ц · '"></span><span
+                                x-show="it.qty_per_min != null"   x-text="it.qty_per_min + '/мин'"></span>
+                        </span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+
+              </div>
+            </td>
+          </tr>
+
+        </tbody>
+      </template>
+
+      <tbody>
+        <tr x-show="!loading && sorted.length === 0">
+          <td colspan="9" class="py-16 text-center text-slate-300 text-sm">Ничего не найдено</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<!-- ═══════════ BATCH ACTION BAR ═══════════ -->
+<div x-show="selected.size > 0"
+     x-transition:enter="transition ease-out duration-200"
+     x-transition:enter-start="opacity-0 translate-y-4"
+     x-transition:enter-end="opacity-100 translate-y-0"
+     x-transition:leave="transition ease-in duration-150"
+     x-transition:leave-start="opacity-100 translate-y-0"
+     x-transition:leave-end="opacity-0 translate-y-4"
+     class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50
+            bg-slate-800 text-white rounded-2xl shadow-2xl
+            flex items-center gap-3 px-5 py-3 text-sm">
+  <span class="font-medium text-slate-300" x-text="'Выбрано: ' + selected.size"></span>
+  <button @click="batchHide(true)"
+          class="bg-slate-600 hover:bg-amber-600 transition-colors px-3 py-1.5 rounded-lg font-medium">
+    🙈 Скрыть
+  </button>
+  <button @click="batchHide(false)"
+          class="bg-slate-600 hover:bg-emerald-600 transition-colors px-3 py-1.5 rounded-lg font-medium">
+    👁 Показать
+  </button>
+  <!-- Удаление — только когда все выбранные являются комплексами -->
+  <button x-show="allSelectedAreComplexes"
+          @click="askBatchDelete()"
+          class="bg-slate-600 hover:bg-red-700 transition-colors px-3 py-1.5 rounded-lg font-medium">
+    🗑 Удалить
+  </button>
+  <button @click="clearSelection()"
+          class="text-slate-400 hover:text-white transition-colors text-xs px-2">
+    ✕ Снять
+  </button>
+</div>
+
+<!-- ═══════════ DELETE CONFIRM MODAL ═══════════ -->
+<div x-show="confirmDelete !== null"
+     x-transition:enter="transition ease-out duration-150"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-100"
+     x-transition:leave-start="opacity-100"
+     x-transition:leave-end="opacity-0"
+     class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
+     @keydown.escape.window="confirmDelete = null">
+  <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full mx-4"
+       @click.stop>
+    <h2 class="font-bold text-slate-800 text-lg mb-1">
+      <span x-text="confirmDelete?.ids.length === 1 ? 'Удалить комплекс?' : 'Удалить комплексы?'"></span>
+    </h2>
+    <p class="text-sm text-slate-500 mb-4">
+      <template x-if="confirmDelete?.ids.length === 1">
+        <span>Комплекс <b class="text-slate-700" x-text="'«' + confirmDelete.names[0] + '»'"></b>
+          будет удалён безвозвратно.</span>
+      </template>
+      <template x-if="confirmDelete?.ids.length > 1">
+        <span>Будет безвозвратно удалено комплексов: <b class="text-slate-700"
+              x-text="confirmDelete.ids.length"></b>.</span>
+      </template>
+    </p>
+    <div class="flex gap-3 justify-end">
+      <button @click="confirmDelete = null"
+              class="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200
+                     text-sm font-medium transition-colors">
+        Отмена
+      </button>
+      <button @click="doDelete()"
+              class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700
+                     text-white text-sm font-medium transition-colors">
+        Удалить навсегда
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+const _ICON_RECIPE  = '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.474l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115l.094-.319z"/></svg>';
+const _ICON_COMPLEX = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="2" r="1.5" fill="currentColor" stroke="none"/><circle cx="2" cy="13" r="1.5" fill="currentColor" stroke="none"/><circle cx="14" cy="13" r="1.5" fill="currentColor" stroke="none"/><line x1="7.1" y1="3.3" x2="3" y2="11.5"/><line x1="8.9" y1="3.3" x2="13" y2="11.5"/><line x1="3.5" y1="13" x2="12.5" y2="13"/></svg>';
+
+function app() {
+  return {
+    nodes:         [],
+    q:             '',
+    type:          'all',
+    showHidden:    false,
+    selected:      new Set(),
+    sortKey:       null,   // 'name' | 'workers' | 'electricity' | 'maintenance'
+    sortDir:       'asc',
+    loading:       true,
+    error:         null,
+    confirmDelete: null,   // { ids: [...], names: [...] } | null
+
+    // ── Load ───────────────────────────────────────────────────
+    async load() {
+      try {
+        const r = await fetch('/api/nodes');
+        if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + await r.text());
+        // Добавляем _open прямо на каждый узел — самый надёжный способ
+        // триггерить Alpine-реактивность при expand/collapse
+        this.nodes = (await r.json()).map(n => ({...n, _open: false, _members: null}));
+      } catch(e) {
+        this.error = 'Ошибка загрузки: ' + e.message;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    // ── Helpers ────────────────────────────────────────────────
+    searchExact(term) { this.q = '"' + term + '"'; },
+    isExactSearch() {
+      const q = this.q.trim();
+      return q.length > 2 && q[0] === '"' && q[q.length - 1] === '"';
+    },
+
+    // ── Filtering ──────────────────────────────────────────────
+    get filtered() {
+      const rawQ  = this.q.trim();
+      const exact = rawQ.startsWith('"') && rawQ.endsWith('"') && rawQ.length > 2;
+      const q     = exact ? rawQ.slice(1, -1).toLowerCase() : rawQ.toLowerCase();
+      return this.nodes.filter(n => {
+        if (this.type !== 'all' && n.node_type !== this.type) return false;
+        if (!this.showHidden && n.deprecated === true)         return false;
+        if (!rawQ) return true;
+        const fields = [
+          n.machine_name ?? '', n.name ?? '',
+          ...(n.inputs  ?? []).map(x => x.item),
+          ...(n.outputs ?? []).map(x => x.item),
+        ];
+        if (exact) return fields.some(f => f.toLowerCase() === q);
+        return fields.join(' ').toLowerCase().includes(q);
+      });
+    },
+
+    // ── Sorting ────────────────────────────────────────────────
+    sortBy(key) {
+      if (this.sortKey === key) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortKey = key;
+        this.sortDir = 'asc';
+      }
+    },
+
+    sortIcon(key) {
+      if (this.sortKey !== key) return '⇅';
+      return this.sortDir === 'asc' ? '▲' : '▼';
+    },
+
+    get sorted() {
+      const rows = [...this.filtered];
+      if (!this.sortKey) return rows;
+
+      const dir = this.sortDir === 'asc' ? 1 : -1;
+
+      // Прочерк = 0: при сортировке по возрастанию идёт первым, по убыванию — последним
+      const num = (v) => (v == null || v < 0) ? 0 : v;
+
+      // Для обслуживания: приоритет = уровень (I=1,II=2,III=3) * 1e5 + ставка
+      const mntPriority = (maint) => {
+        if (!maint || !maint.length) return 0;
+        const tier = s => { const m = s.match(/(\d+)$/); return m ? +m[1] : 1; };
+        const top  = maint.reduce((a, b) => tier(b.item) > tier(a.item) ? b : a);
+        return tier(top.item) * 100000 + top.rate_per_min;
+      };
+
+      rows.sort((a, b) => {
+        let va, vb;
+        if (this.sortKey === 'name') {
+          return dir * (a.machine_name ?? a.name ?? '')
+                         .localeCompare(b.machine_name ?? b.name ?? '', 'ru');
+        }
+        if (this.sortKey === 'workers') {
+          va = num(a.workers);
+          vb = num(b.workers);
+        } else if (this.sortKey === 'electricity') {
+          va = num(a.electricity_kw != null ? Math.abs(a.electricity_kw) : 0);
+          vb = num(b.electricity_kw != null ? Math.abs(b.electricity_kw) : 0);
+        } else if (this.sortKey === 'maintenance') {
+          va = mntPriority(a.maintenance);
+          vb = mntPriority(b.maintenance);
+        }
+        if (va < vb) return -dir;
+        if (va > vb) return  dir;
+        return 0;
+      });
+      return rows;
+    },
+
+    // ── Expand / collapse ──────────────────────────────────────
+    async toggle(n) {
+      const idx = this.nodes.findIndex(
+        x => x.node_type === n.node_type && x.node_id === n.node_id
+      );
+      if (idx === -1) return;
+      const willOpen = !this.nodes[idx]._open;
+      this.nodes[idx] = {...this.nodes[idx], _open: willOpen};
+      // Для комплексов: подгружаем список машин при первом раскрытии
+      if (willOpen && n.node_type === 'complex' && !this.nodes[idx]._members) {
+        try {
+          const r = await fetch(`/api/complex/${n.node_id}/members`);
+          if (r.ok) this.nodes[idx] = {...this.nodes[idx], _members: await r.json()};
+        } catch(_) { /* тихая ошибка */ }
+      }
+      this.nodes = [...this.nodes];
+    },
+
+    // ── Selection ──────────────────────────────────────────────
+    key(n) { return n.node_type + ':' + n.node_id; },
+
+    isSelected(n) { return this.selected.has(this.key(n)); },
+
+    toggleSelect(n) {
+      const k = this.key(n);
+      if (this.selected.has(k)) { this.selected.delete(k); }
+      else                       { this.selected.add(k);    }
+      this.selected = new Set(this.selected);
+    },
+
+    get allSelected() {
+      return this.filtered.length > 0 &&
+             this.filtered.every(n => this.selected.has(this.key(n)));
+    },
+    get someSelected() {
+      return this.filtered.some(n => this.selected.has(this.key(n)));
+    },
+
+    toggleSelectAll(checked) {
+      if (checked) { this.filtered.forEach(n => this.selected.add(this.key(n)));    }
+      else          { this.filtered.forEach(n => this.selected.delete(this.key(n))); }
+      this.selected = new Set(this.selected);
+    },
+
+    clearSelection() { this.selected = new Set(); },
+
+    // Все выбранные — только комплексы (показываем кнопку удаления в батч-баре)
+    get allSelectedAreComplexes() {
+      return this.selected.size > 0 &&
+             [...this.selected].every(k => k.startsWith('complex:'));
+    },
+
+    // ── Delete ─────────────────────────────────────────────────
+    // Одиночное удаление — вызывается из строки таблицы
+    askDelete(node) {
+      this.confirmDelete = {
+        ids:   [node.node_id],
+        names: [node.name ?? node.machine_name ?? String(node.node_id)],
+      };
+    },
+
+    // Массовое удаление — вызывается из батч-бара (только комплексы)
+    askBatchDelete() {
+      const list = [...this.selected].map(k => {
+        const id   = parseInt(k.split(':')[1]);
+        const node = this.nodes.find(n => n.node_type === 'complex' && n.node_id === id);
+        return { id, name: node?.name ?? node?.machine_name ?? String(id) };
+      });
+      this.confirmDelete = {
+        ids:   list.map(x => x.id),
+        names: list.map(x => x.name),
+      };
+    },
+
+    async doDelete() {
+      if (!this.confirmDelete) return;
+      const { ids } = this.confirmDelete;
+      this.confirmDelete = null;
+      try {
+        const results = await Promise.all(
+          ids.map(id => fetch(`/api/complex/${id}`, { method: 'DELETE' }))
+        );
+        const failed = results.filter(r => !r.ok);
+        if (failed.length) throw new Error(`Не удалось удалить ${failed.length} комплекс(а)`);
+        // Убираем из списка и снимаем выделение
+        const idSet = new Set(ids);
+        this.nodes = this.nodes.filter(
+          n => !(n.node_type === 'complex' && idSet.has(n.node_id))
+        );
+        for (const id of ids) this.selected.delete('complex:' + id);
+        this.selected = new Set(this.selected);
+      } catch(e) { alert('Ошибка удаления: ' + e.message); }
+    },
+
+    // ── Per-row hidden toggle ──────────────────────────────────
+    async toggleHidden(node) {
+      const newVal = !node.deprecated;
+      try {
+        const r = await fetch(`/api/node/${node.node_type}/${node.node_id}/hidden`, {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({hidden: newVal}),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const idx = this.nodes.findIndex(
+          n => n.node_type === node.node_type && n.node_id === node.node_id
+        );
+        if (idx !== -1) {
+          this.nodes[idx] = {...this.nodes[idx], deprecated: newVal};
+          this.nodes = [...this.nodes];
+        }
+      } catch(e) { alert('Ошибка: ' + e.message); }
+    },
+
+    // ── Batch hidden ───────────────────────────────────────────
+    async batchHide(hidden) {
+      const items = [...this.selected].map(k => {
+        const [node_type, node_id] = k.split(':');
+        return {node_type, node_id: parseInt(node_id)};
+      });
+      try {
+        const r = await fetch('/api/nodes/hidden/batch', {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({hidden, items}),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const keySet = this.selected;
+        this.nodes = this.nodes.map(n =>
+          keySet.has(this.key(n)) ? {...n, deprecated: hidden} : n
+        );
+        this.clearSelection();
+      } catch(e) { alert('Ошибка: ' + e.message); }
+    },
+
+    // ── Icons ──────────────────────────────────────────────────
+    iconOf(name) {
+      return '/static/icons/' + name.replaceAll(' ', '_') + '.png';
+    },
+  };
+}
+</script>
+</body>
+</html>

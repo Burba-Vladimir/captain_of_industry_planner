@@ -1,0 +1,1613 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" class="{{ 'dark' if theme == 'dark' else '' }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if complex_id != 'null' %}Complex Editor{% else %}New Complex{% endif %} — CoI Planner</title>
+  <script>
+    (function(){ var t=localStorage.getItem('coi_theme'); if(t==='dark') document.documentElement.classList.add('dark'); })();
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' };</script>
+  <script>window._coiUser = {{ user | tojson }};</script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak]   { display:none !important; }
+
+    /* ── Canvas ───────────────────────────────────────────────── */
+    #canvas-wrap {
+      position: relative;
+      width:  8000px;
+      height: 5000px;
+    }
+    #canvas-svg {
+      position: absolute; inset: 0;
+      width: 8000px; height: 5000px;
+      pointer-events: none;
+      overflow: visible;
+    }
+
+    /* ── Node tile ────────────────────────────────────────────── */
+    .node-tile {
+      position: absolute;
+      width: 340px;
+      background: white;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.08);
+      user-select: none;
+    }
+    .dark .node-tile { background:#1e293b; border-color:#334155; }
+    .node-tile.is-complex  { border-color: #a78bfa; }
+    .node-tile.is-selected { border-color: #3b82f6; box-shadow: 0 0 0 2.5px #bfdbfe, 0 2px 8px rgba(0,0,0,.08); }
+    .dark .node-tile.is-selected { box-shadow: 0 0 0 2.5px #1d4ed8, 0 2px 8px rgba(0,0,0,.3); }
+    .node-header {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 8px;
+      background: #f8fafc;
+      border-radius: 8px 8px 0 0;
+      border-bottom: 1px solid #e2e8f0;
+      cursor: grab;
+    }
+    .dark .node-header { background:#0f172a; border-bottom-color:#1e293b; }
+    /* Complex nodes get a violet-tinted header + body */
+    .node-tile.is-complex .node-header { background:#ede9fe; border-bottom-color:#ddd6fe; }
+    .node-tile.is-complex .node-body   { background:#faf8ff; }
+    .dark .node-tile.is-complex .node-header { background:#2e1065; border-bottom-color:#3b0764; }
+    .dark .node-tile.is-complex .node-body   { background:#1e1040; }
+    .node-header:active { cursor: grabbing; }
+    .node-body { display: flex; }
+    .ports-col { flex: 1; padding: 4px 0; min-height: 26px; }
+    .ports-col.inputs { border-right: 1px solid #f1f5f9; }
+    .dark .ports-col.inputs { border-right-color: #1e293b; }
+    .port-row { display:flex; align-items:center; height:26px; padding:0 4px; gap:3px; }
+    .port-row.output-row { flex-direction:row-reverse; }
+    .port-btn {
+      width:14px; height:14px; border-radius:50%; border:2px solid #94a3b8;
+      background:white; flex-shrink:0; cursor:pointer; padding:0;
+      transition: background .15s, border-color .15s;
+    }
+    .dark .port-btn { background:#1e293b; }
+    .port-btn.balanced   { background:#3b82f6; border-color:#2563eb; }
+    .port-btn.unbalanced { background:#fed7aa; border-color:#f97316; }
+    .port-btn.external   { background:#86efac; border-color:#16a34a; }
+    .port-btn.idle       { background:#a78bfa; border-color:#7c3aed; }
+    .port-btn.open:hover { background:#bfdbfe; border-color:#3b82f6; }
+
+    /* Canvas cursor */
+    #canvas-wrap { cursor: grab; }
+    #canvas-wrap:active { cursor: grabbing; }
+    #canvas-wrap.is-rubber-band,
+    #canvas-wrap.is-rubber-band:active { cursor: crosshair; }
+    .node-tile, .node-tile * { cursor: default; }
+
+    .port-icon  { width:16px; height:16px; object-fit:contain; flex-shrink:0; }
+    .port-item  { font-size:.7rem; color:#475569; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:60px; }
+    .dark .port-item { color:#94a3b8; }
+    .port-qty   { font-size:.7rem; color:#64748b; white-space:nowrap; font-variant-numeric:tabular-nums; margin-left:auto; }
+    .output-row .port-qty { margin-left:0; margin-right:auto; }
+
+    /* Chip */
+    .chip { display:inline-flex; align-items:center; padding:1px 6px; border-radius:999px; font-size:.68rem; font-weight:500; }
+
+    /* Picker sidebar */
+    #picker {
+      position: fixed; top:0; right:0; bottom:0;
+      width: 500px; background:white;
+      border-left: 1px solid #e2e8f0;
+      box-shadow: -4px 0 20px rgba(0,0,0,.1);
+      display: flex; flex-direction:column; z-index:40;
+    }
+    .dark #picker { background:#1e293b; border-left-color:#334155; }
+    .picker-row {
+      display:flex; flex-direction:column; gap:4px;
+      padding:8px 12px;
+      border-bottom:1px solid #f1f5f9;
+      cursor:pointer;
+    }
+    .dark .picker-row { border-bottom-color:#0f172a; }
+    .picker-row:hover { background:#f8fafc; }
+    .dark .picker-row:hover { background:#0f172a; }
+    .picker-row.special {
+      flex-direction:row; align-items:center; gap:8px;
+      background:#eff6ff; color:#2563eb; font-weight:500; font-size:.82rem;
+    }
+    .dark .picker-row.special { background:#1e3a5f; color:#60a5fa; }
+    .picker-row.special:hover { background:#dbeafe; }
+    .dark .picker-row.special:hover { background:#1e40af33; }
+    .picker-hl { background:#eff6ff; border-radius:4px; padding:0 3px; }
+    .dark .picker-hl { background:#1e3a5f; }
+
+    /* Summary bar */
+    #summary-bar {
+      position:fixed; bottom:0; left:0; right:0;
+      background:#1e293b; color:white;
+      display:flex; align-items:center; flex-wrap:wrap; gap:6px;
+      padding:8px 16px; font-size:.78rem; z-index:30;
+    }
+  </style>
+  <script>
+    window._i18n = {{ i18n | tojson }};
+    function jt(key, vars) {
+      const parts = key.split('.');
+      let v = window._i18n;
+      for (const p of parts) { if (v && typeof v === 'object') v = v[p]; else return key; }
+      if (typeof v !== 'string') return key;
+      if (vars) Object.entries(vars).forEach(([k,val]) => { v = v.replace('{'+k+'}', val); });
+      return v;
+    }
+  </script>
+</head>
+
+<body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 overflow-hidden h-screen flex flex-col"
+      x-data="complexEditor({{ complex_id }}, {{ 'true' if readonly else 'false' }})"
+      x-init="init()" x-cloak>
+
+<!-- ═══════════ HEADER ═══════════ -->
+<header class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm z-20 shrink-0">
+  <div class="px-4 py-2.5 flex items-center gap-2 flex-wrap">
+
+    <a href="/" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-sm font-medium shrink-0 transition-colors">
+      ← {{ t('editor.back') }}
+    </a>
+
+    {% if not readonly %}
+    <!-- Name input (owner only) -->
+    <input x-model="name"
+           placeholder="{{ t('complex.name_placeholder') }}"
+           class="flex-1 min-w-32 max-w-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600
+                  text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-400
+                  bg-white dark:bg-slate-700 dark:text-slate-100">
+    {% else %}
+    <!-- Read-only title -->
+    <span class="flex-1 min-w-0 text-sm font-medium text-slate-700 dark:text-slate-200 truncate px-1"
+          x-text="name || 'Complex'"></span>
+    {% endif %}
+
+    <span class="text-xs text-slate-400 shrink-0"
+          x-show="complexId" x-text="'#' + complexId"></span>
+
+    <div class="flex items-center gap-2 ml-auto flex-wrap">
+
+      <!-- Read-only banner -->
+      {% if readonly %}
+      <span class="chip bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-xs shrink-0">
+        {{ t('complex.view_readonly') }}
+      </span>
+      {% endif %}
+
+      <!-- Forked-from indicator -->
+      <span x-show="forkedFrom"
+            class="text-xs text-slate-400 shrink-0"
+            x-text="'{{ t('complex.forked_from') }} #' + forkedFrom"></span>
+
+      <!-- Save error -->
+      <span x-show="saveError" class="text-xs text-red-500" x-text="saveError"></span>
+
+      <!-- Guest notice: shown once after first save -->
+      <div x-show="guestNotice"
+           class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6 max-w-sm w-full">
+          <div class="text-2xl mb-3">💾</div>
+          <h3 class="font-bold text-slate-800 dark:text-slate-100 mb-2">{{ t('guest.saved_title') }}</h3>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">{{ t('guest.saved_body') }}</p>
+          <div class="flex gap-2">
+            <a href="/?login=1"
+               class="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium
+                      rounded-lg text-center transition-colors">
+              {{ t('nav.login') }}
+            </a>
+            <a href="/"
+               class="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 text-sm font-medium
+                      rounded-lg text-slate-600 dark:text-slate-300 text-center hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+              {{ t('guest.continue_guest') }}
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {% if not readonly %}
+      <!-- Visibility toggle (owner) -->
+      <div x-show="complexId" class="relative" x-data="{visOpen:false}">
+        <button @click="visOpen=!visOpen"
+                :class="visibility==='public'
+                  ? 'border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30'
+                  : 'border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400'"
+                class="px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors">
+          <span x-text="visibility==='public' ? '🌐 ' + '{{ t('complex.visibility_public') }}' : '🔒 ' + '{{ t('complex.visibility_private') }}'"></span>
+        </button>
+        <div x-show="visOpen" @click.outside="visOpen=false"
+             class="absolute right-0 top-9 w-44 bg-white dark:bg-slate-800
+                    border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 p-1">
+          <button @click="setVisibility('private'); visOpen=false"
+                  class="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-200
+                         hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+            🔒 {{ t('complex.visibility_private') }}
+          </button>
+          <button @click="visOpen=false; tryPublish()"
+                  class="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-200
+                         hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+            🌐 {{ t('complex.visibility_public') }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Save (остаёмся в редакторе) -->
+      <button @click="save(false)"
+              :disabled="saving || !name.trim()"
+              class="px-4 py-1.5 border border-blue-600 text-blue-600 dark:text-blue-400 text-sm font-medium rounded-lg
+                     hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+        <span x-text="saving ? '{{ t('complex.saving') }}' : '{{ t('complex.save') }}'"></span>
+      </button>
+      <!-- Save and Exit -->
+      <button @click="save(true)"
+              :disabled="saving || !name.trim()"
+              class="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg
+                     hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+        <span x-text="saving ? '{{ t('complex.saving') }}' : '{{ t('complex.save_exit') }}'"></span>
+      </button>
+      {% endif %}
+
+      {% if readonly %}
+      <!-- Like button -->
+      {% if user %}
+      <button @click="toggleLike()"
+              :class="isLiked ? 'bg-rose-50 dark:bg-rose-900/30 text-rose-500 border-rose-300 dark:border-rose-700'
+                               : 'text-slate-400 dark:text-slate-500 border-slate-300 dark:border-slate-600 hover:text-rose-400'"
+              class="px-3 py-1.5 rounded-lg border text-sm transition-colors flex items-center gap-1">
+        ♥ <span x-text="likesCount"></span>
+      </button>
+      {% else %}
+      <span class="text-sm text-slate-400 flex items-center gap-1">
+        ♥ <span x-text="likesCount"></span>
+      </span>
+      {% endif %}
+
+      <!-- Fork button -->
+      {% if user %}
+      <button @click="fork()"
+              class="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg
+                     hover:bg-blue-700 transition-colors">
+        {{ t('complex.fork') }}
+      </button>
+      {% endif %}
+      {% endif %}
+
+      <!-- Theme toggle (localStorage) -->
+      <button @click="toggleTheme()"
+              class="shrink-0 w-8 h-8 rounded-lg border border-slate-200 dark:border-slate-600
+                     flex items-center justify-center text-sm hover:bg-slate-100 dark:hover:bg-slate-700">
+        <span x-text="isDark ? '🌙' : '☀️'"></span>
+      </button>
+
+      <!-- Lang switch -->
+      <div class="shrink-0 flex rounded-lg border border-slate-200 dark:border-slate-600 text-xs overflow-hidden">
+        {% for lc, lname in [('en','EN'),('ru','РУ')] %}
+        <button @click="switchLang('{{ lc }}')"
+                class="px-2 py-1.5 transition-colors {{ 'bg-blue-600 text-white' if lang == lc else 'bg-white dark:bg-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-600' }}">{{ lname }}</button>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════ LOADING / ERROR ═══════════ -->
+<div x-show="loading" class="flex items-center justify-center flex-1 text-slate-400 dark:text-slate-500">
+  <div class="text-4xl animate-spin mr-3">⚙</div> {{ t('editor.loading') }}
+</div>
+<div x-show="error" class="m-4 bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm font-mono"
+     x-text="error"></div>
+
+<!-- ═══════════ CANVAS SCROLL AREA ═══════════ -->
+<div x-show="!loading && !error"
+     id="canvas-scroll"
+     class="flex-1 relative"
+     style="overflow:auto; padding-bottom:48px">
+
+  <div id="canvas-wrap"
+       :class="{'is-rubber-band': _rubberBand !== null}"
+       @mousedown="onCanvasMouseDown($event)">
+
+    <!-- SVG edges -->
+    <svg id="canvas-svg" xmlns="http://www.w3.org/2000/svg"
+         style="position:absolute;inset:0;width:8000px;height:5000px;overflow:visible">
+      <defs>
+        <marker id="arr"     markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+          <path d="M0,0 L7,3.5 L0,7 Z" fill="#94a3b8"/>
+        </marker>
+        <marker id="arr-lcm" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+          <path d="M0,0 L7,3.5 L0,7 Z" fill="#f59e0b"/>
+        </marker>
+      </defs>
+      <g x-html="edgeSvgContent" @click="onEdgeClick($event)" style="pointer-events:all"></g>
+    </svg>
+
+    <!-- ── NODE TILES ── -->
+    <template x-for="node in nodes" :key="node._id">
+      <div class="node-tile"
+           :data-nid="node._id"
+           :class="(node.node_type==='complex'?'is-complex ':'')+(selected[node._id]?'is-selected':'')"
+           :style="`left:${node.pos_x}px; top:${node.pos_y}px`">
+
+        <div class="node-header"
+             @mousedown.prevent="readOnly || startDrag($event, node)">
+          <span :class="node.node_type==='recipe'?'chip bg-blue-100 text-blue-700':'chip bg-violet-100 text-violet-700'"
+                :title="node.node_type==='recipe'?'recipe':'complex'"
+                x-html="node.node_type==='recipe'?_ICON_RECIPE:_ICON_COMPLEX"></span>
+          <span class="text-xs font-semibold text-slate-700 dark:text-slate-200 flex-1 truncate"
+                x-text="node.label"></span>
+          <div class="flex items-center gap-1 shrink-0" @mousedown.stop>
+            <button @click.stop="setCount(node, +node.count - (isManualPartial(node) ? 0.01 : 1))"
+                    :disabled="isCountLocked(node) || readOnly"
+                    class="w-5 h-5 rounded bg-slate-100 dark:bg-slate-600 hover:bg-slate-200 text-slate-500
+                           flex items-center justify-center text-xs font-bold
+                           disabled:opacity-30 disabled:cursor-not-allowed">−</button>
+            <input type="number"
+                   :min="isManualPartial(node)?'0.01':'1'"
+                   step="any"
+                   :value="(hasIdle(node)||isManualPartial(node)) ? fmtQty(nodeEffectiveCount(node)) : node.count"
+                   @change.stop="setCount(node, $event.target.value)"
+                   @mousedown.stop @click.stop
+                   :disabled="isCountLocked(node) || readOnly"
+                   :class="isCountLocked(node)?'bg-slate-100 dark:bg-slate-600 text-slate-400 border-slate-200':'bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600'"
+                   class="w-12 text-center text-xs font-bold border rounded px-1 py-0.5
+                          dark:text-slate-200 focus:outline-none disabled:cursor-not-allowed [appearance:textfield]
+                          [&::-webkit-outer-spin-button]:appearance-none
+                          [&::-webkit-inner-spin-button]:appearance-none">
+            <button @click.stop="setCount(node, +node.count + (isManualPartial(node) ? 0.01 : 1))"
+                    :disabled="isCountLocked(node) || readOnly"
+                    class="w-5 h-5 rounded bg-slate-100 dark:bg-slate-600 hover:bg-slate-200 text-slate-500
+                           flex items-center justify-center text-xs font-bold
+                           disabled:opacity-30 disabled:cursor-not-allowed">+</button>
+          </div>
+          <a x-show="node.node_type === 'complex' && (node.node_ref_slug || node.node_ref_id)"
+             :href="`/complex/${node.node_ref_slug || node.node_ref_id}/edit`"
+             target="_blank"
+             @click.stop @mousedown.stop
+             class="text-violet-400 hover:text-violet-600 text-sm shrink-0
+                    transition-colors leading-none" title="{{ t('editor.open_complex') }}">↗</a>
+          <button x-show="!readOnly"
+                  @click.stop="removeNode(node)"
+                  class="text-slate-300 hover:text-red-400 text-sm ml-1 shrink-0 transition-colors"
+                  title="{{ t('editor.remove_node') }}">✕</button>
+        </div>
+
+        <!-- Body: inputs | outputs -->
+        <div class="node-body">
+          <div class="ports-col inputs">
+            <template x-for="(inp, idx) in scaledFlows(node,'input')" :key="inp.item">
+              <div class="port-row">
+                <button class="port-btn"
+                        :class="portBalance(node, inp.item, 'input')"
+                        :title="'{{ t('editor.producers') }}: ' + inp.item"
+                        @click.stop="openPicker(node, inp.item, 'produces')"></button>
+                <img :src="iconOf(inp.item)" @error="$el.style.display='none'" class="port-icon">
+                <span class="port-item" x-text="inp.item"></span>
+                <span class="port-qty" x-text="fmtQty(inp.scaled)"></span>
+              </div>
+            </template>
+            <div x-show="scaledFlows(node,'input').length===0"
+                 class="text-xs text-slate-300 dark:text-slate-600 px-3 py-1">{{ t('editor.no_inputs') }}</div>
+          </div>
+          <div class="ports-col outputs">
+            <template x-for="(out, idx) in scaledFlows(node,'output')" :key="out.item">
+              <div class="port-row output-row">
+                <button class="port-btn"
+                        :class="portBalance(node, out.item, 'output')"
+                        :title="'{{ t('editor.consumers') }}: ' + out.item"
+                        @click.stop="openPicker(node, out.item, 'consumes')"></button>
+                <img :src="iconOf(out.item)" @error="$el.style.display='none'" class="port-icon">
+                <span class="port-item" x-text="out.item"></span>
+                <span class="port-qty" x-text="fmtQty(out.scaled)"></span>
+              </div>
+            </template>
+            <div x-show="scaledFlows(node,'output').length===0"
+                 class="text-xs text-slate-300 dark:text-slate-600 px-3 py-1 text-right">{{ t('editor.no_outputs') }}</div>
+          </div>
+        </div>
+
+        <!-- Stats footer -->
+        <div class="flex items-center flex-wrap gap-x-3 gap-y-0.5 px-3 py-1.5
+                    border-t border-slate-100 dark:border-slate-700 text-xs text-slate-400">
+          <span x-show="node.workers>0" x-text="'👷 '+nodeIdleCount(node)*node.workers"></span>
+          <span x-show="node.electricity_kw && node.electricity_kw!==0"
+                :class="node.electricity_kw<0?'text-emerald-500':'text-orange-400'"
+                x-text="'⚡ '+Math.abs(+(node.electricity_kw*nodeEffectiveCount(node)).toFixed(1))"></span>
+          <span x-show="hasIdle(node)||isManualPartial(node)"
+                class="text-violet-500 font-medium"
+                x-text="'⏸ '+Math.round(nodeEfficiency(node)*100)+'%'"></span>
+          <template x-for="m in (node.maintenance||[])" :key="m.item">
+            <span class="flex items-center gap-0.5" :title="m.item">
+              <img :src="iconOf(m.item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
+              <span x-text="fmtQty(+(m.rate_per_min*nodeEffectiveCount(node)).toFixed(3))"></span>
+            </span>
+          </template>
+          <button x-show="!hasLcm(node) && !readOnly"
+                  @click.stop="toggleManualPartial(node)"
+                  :style="{background:isManualPartial(node)?'#a78bfa':'transparent', borderColor:isManualPartial(node)?'#7c3aed':'#a78bfa'}"
+                  class="ml-auto w-3.5 h-3.5 rounded-full border-2 cursor-pointer transition-all shrink-0"></button>
+        </div>
+      </div>
+    </template>
+
+    <!-- Rubber band -->
+    <div x-show="_rubberBand !== null"
+         :style="_rubberBand ? {
+           position:'absolute',
+           left:   Math.min(_rubberBand.startX,_rubberBand.curX)+'px',
+           top:    Math.min(_rubberBand.startY,_rubberBand.curY)+'px',
+           width:  Math.abs(_rubberBand.curX-_rubberBand.startX)+'px',
+           height: Math.abs(_rubberBand.curY-_rubberBand.startY)+'px',
+           background:'rgba(59,130,246,0.08)',
+           border:'1.5px dashed #3b82f6',
+           borderRadius:'2px',
+           pointerEvents:'none',
+           zIndex:'500'
+         }:{}"
+         style="position:absolute;pointer-events:none;z-index:500"></div>
+
+    <!-- Empty canvas hint -->
+    <div x-show="nodes.length===0"
+         class="absolute inset-0 flex items-center justify-center pointer-events-none">
+      <div class="text-center text-slate-300 dark:text-slate-600">
+        <div class="text-5xl mb-3">⬡</div>
+        <p class="text-sm">{{ t('editor.canvas_empty') }}</p>
+        <p class="text-xs mt-1 text-slate-200 dark:text-slate-700">{{ t('editor.canvas_hint') }}</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ PICKER SIDEBAR ═══════════ -->
+<div id="picker" x-show="pickerOpen"
+     x-transition:enter="transition ease-out duration-200"
+     x-transition:enter-start="translate-x-full"
+     x-transition:enter-end="translate-x-0"
+     x-transition:leave="transition ease-in duration-150"
+     x-transition:leave-start="translate-x-0"
+     x-transition:leave-end="translate-x-full">
+
+  <div class="flex items-center gap-2 px-3 py-2.5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 shrink-0">
+    <div class="flex-1">
+      <p class="text-xs text-slate-500">
+        <span x-text="pickerContext?.direction==='produces' ? '{{ t('picker.produces') }}' : '{{ t('picker.consumes') }}'"></span>:
+      </p>
+      <p class="font-semibold text-sm text-slate-700 dark:text-slate-200" x-text="pickerContext?.item"></p>
+    </div>
+    <button @click="closePicker()" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-lg">✕</button>
+  </div>
+
+  <div class="flex items-center gap-2 px-3 py-2 border-b border-slate-100 dark:border-slate-700 shrink-0">
+    <div class="flex rounded-md border border-slate-200 dark:border-slate-600 text-xs overflow-hidden">
+      <template x-for="tp in [{v:'all',l:'{{ t('browse.all') }}'},{v:'recipe',l:'{{ t('browse.recipes') }}'},{v:'complex',l:'{{ t('browse.complexes') }}'},{v:'community',l:'{{ t('nav.public') }}'}]" :key="tp.v">
+        <button @click="pickerType=tp.v; reloadPicker()"
+                :class="pickerType===tp.v ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50'"
+                class="px-2 py-1 transition-colors" x-text="tp.l"></button>
+      </template>
+    </div>
+    <label class="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 cursor-pointer select-none ml-auto">
+      <input type="checkbox" x-model="pickerShowHidden" @change="reloadPicker()" class="rounded accent-blue-500">
+      {{ t('browse.show_hidden') }}
+    </label>
+  </div>
+
+  <!-- External port button — hidden if already connected -->
+  <div class="picker-row special shrink-0"
+       x-show="!readOnly && !_isPickerPortConnected()"
+       @click="markExternal()">
+    <span x-show="!_isPickerPortExternal()">
+      📦
+      <span x-text="pickerContext?.direction==='produces'
+        ? '{{ t('picker.ext_input') }}'
+        : '{{ t('picker.ext_output') }}'"></span>
+    </span>
+    <span x-show="_isPickerPortExternal()">✕ {{ t('picker.remove_ext') }}</span>
+  </div>
+
+  <!-- Idle button (unbalanced ports) -->
+  <div class="picker-row special shrink-0"
+       style="background:#f5f3ff; color:#6d28d9;"
+       x-show="!readOnly && _isPickerPortUnbalanced()"
+       @click="markIdle()">
+    ⏸ <span>Partial load: node runs below capacity</span>
+  </div>
+
+  <!-- Remove idle -->
+  <div class="picker-row special shrink-0"
+       style="background:#f5f3ff; color:#6d28d9;"
+       x-show="!readOnly && _isPickerPortIdle()"
+       @click="removeIdle()">
+    ▶ <span>{{ t('editor.run_full') }}</span>
+  </div>
+
+  <div class="flex-1 overflow-y-auto">
+    <div x-show="pickerLoading" class="flex items-center justify-center py-8 text-slate-400 text-sm">{{ t('editor.picker_searching') }}</div>
+    <div x-show="!pickerLoading && pickerNodes.length===0"
+         class="py-8 text-center text-slate-300 dark:text-slate-600 text-sm">{{ t('editor.picker_nothing') }}</div>
+
+    <template x-for="n in pickerNodes" :key="n.node_type+':'+n.node_id">
+      <div class="picker-row" @click="readOnly || addNodeFromPicker(n)">
+        <div class="flex items-center gap-2 w-full">
+          <span :class="n.node_type==='recipe'?'chip bg-blue-100 text-blue-700':'chip bg-violet-100 text-violet-700'"
+                :title="n.node_type==='recipe'?'recipe':'complex'"
+                x-html="n.node_type==='recipe'?_ICON_RECIPE:_ICON_COMPLEX"></span>
+          <span class="flex-1 text-xs font-semibold text-slate-700 dark:text-slate-200 truncate"
+                x-text="n.machine_name||n.name"></span>
+          <span class="flex items-center gap-2 text-xs shrink-0">
+            <!-- Community: автор и лайки -->
+            <template x-if="n.is_community">
+              <span class="flex items-center gap-1.5">
+                <span x-show="n.likes_count>0" class="text-rose-400">♥ <span x-text="n.likes_count"></span></span>
+                <span class="text-slate-400 truncate max-w-16" x-text="n.author_name||'?'"></span>
+              </span>
+            </template>
+            <!-- Обычный: рабочие и электричество -->
+            <template x-if="!n.is_community">
+              <span class="flex items-center gap-2">
+                <span x-show="n.workers>0" class="text-slate-400">
+                  👷 <span x-text="n.workers"></span>
+                </span>
+                <span x-show="n.electricity_kw && n.electricity_kw!==0"
+                      :class="n.electricity_kw<0?'text-emerald-600':'text-orange-400'">
+                  ⚡ <span x-text="Math.abs(n.electricity_kw)"></span>
+                </span>
+              </span>
+            </template>
+          </span>
+        </div>
+        <div x-show="(n.inputs||[]).length>0" class="flex items-center gap-1 flex-wrap pl-1">
+          <span class="text-red-400 text-xs mr-0.5">↓</span>
+          <template x-for="inp in (n.inputs||[])" :key="inp.item">
+            <span class="flex items-center gap-0.5"
+                  :class="inp.item===pickerContext?.item && pickerContext?.direction==='consumes' ? 'picker-hl' : ''"
+                  :title="inp.item+' '+fmtQty(inp.qty_per_min)+'/min'">
+              <img :src="iconOf(inp.item)" @error="$el.style.display='none'" class="w-4 h-4 object-contain flex-shrink-0">
+              <span class="text-xs text-slate-500 tabular-nums" x-text="fmtQty(inp.qty_per_min)"></span>
+            </span>
+          </template>
+        </div>
+        <div x-show="(n.outputs||[]).length>0" class="flex items-center gap-1 flex-wrap pl-1">
+          <span class="text-emerald-500 text-xs mr-0.5">↑</span>
+          <template x-for="out in (n.outputs||[])" :key="out.item">
+            <span class="flex items-center gap-0.5"
+                  :class="out.item===pickerContext?.item && pickerContext?.direction==='produces' ? 'picker-hl' : ''"
+                  :title="out.item+' '+fmtQty(out.qty_per_min)+'/min'">
+              <img :src="iconOf(out.item)" @error="$el.style.display='none'" class="w-4 h-4 object-contain flex-shrink-0">
+              <span class="text-xs text-slate-500 tabular-nums" x-text="fmtQty(out.qty_per_min)"></span>
+            </span>
+          </template>
+        </div>
+      </div>
+    </template>
+  </div>
+</div>
+
+<!-- ═══════════ SUMMARY BAR ═══════════ -->
+<div id="summary-bar" x-show="!loading && !error">
+  <span class="text-slate-400 font-medium mr-2">{{ t('editor.total') }}</span>
+  <span x-show="summary.totalWorkers>0" class="bg-slate-700 rounded px-2 py-0.5">
+    👷 <span x-text="Math.round(summary.totalWorkers)"></span>
+  </span>
+  <span x-show="summary.totalElec!==0"
+        :class="summary.totalElec<0?'text-emerald-400':'text-orange-300'"
+        class="bg-slate-700 rounded px-2 py-0.5">
+    ⚡ <span x-text="Math.abs(+summary.totalElec.toFixed(1))"></span> kW
+  </span>
+  <template x-for="m in summary.maintenance" :key="m.item">
+    <span class="bg-slate-700 rounded px-2 py-0.5 flex items-center gap-1" :title="m.item">
+      <img :src="iconOf(m.item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
+      <span x-text="fmtQty(m.rate)"></span>
+    </span>
+  </template>
+  <span class="text-slate-500 mx-1">|</span>
+  <span class="text-slate-400 text-xs">{{ t('editor.in') }}</span>
+
+  <template x-for="f in summary.externalIn" :key="f.item">
+    <span @click="openPickerForItem(f.item, 'produces')"
+          :class="summary.extPortIn.includes(f.item)
+            ? 'bg-green-900/40 text-green-300 ring-1 ring-green-500/40'
+            : 'bg-red-900/40 text-red-300'"
+          class="flex items-center gap-1 rounded px-2 py-0.5 cursor-pointer hover:opacity-80 transition-opacity"
+          :title="summary.extPortIn.includes(f.item) ? f.item + ' — {{ t('editor.ext_input_tooltip') }}' : f.item + ' — {{ t('editor.needs_producer_tooltip') }}'">
+      <span x-show="summary.extPortIn.includes(f.item)" class="text-xs leading-none">📦</span>
+      <img :src="iconOf(f.item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
+      <span x-text="fmtQty(f.qty)"></span>
+    </span>
+  </template>
+  <template x-for="item in summary.extPortIn.filter(i => !summary.externalIn.some(f => f.item === i))" :key="'epi:'+item">
+    <span @click="openPickerForItem(item, 'produces')"
+          class="flex items-center gap-1 bg-green-900/40 text-green-300 ring-1 ring-green-500/40
+                 rounded px-2 py-0.5 cursor-pointer hover:opacity-80 transition-opacity"
+          :title="item + ' — {{ t('editor.ext_input_balanced') }}'">
+      <span class="text-xs leading-none">📦</span>
+      <img :src="iconOf(item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
+    </span>
+  </template>
+  <span x-show="summary.externalIn.length===0 && summary.extPortIn.length===0" class="text-slate-600 text-xs">{{ t('editor.none') }}</span>
+
+  <span class="text-slate-500 mx-1">|</span>
+  <span class="text-slate-400 text-xs">{{ t('editor.out') }}</span>
+
+  <template x-for="f in summary.externalOut" :key="f.item">
+    <span @click="openPickerForItem(f.item, 'consumes')"
+          :class="summary.extPortOut.includes(f.item)
+            ? 'bg-green-900/40 text-green-300 ring-1 ring-green-500/40'
+            : 'bg-amber-900/40 text-amber-300'"
+          class="flex items-center gap-1 rounded px-2 py-0.5 cursor-pointer hover:opacity-80 transition-opacity"
+          :title="summary.extPortOut.includes(f.item) ? f.item + ' — {{ t('editor.ext_output_tooltip') }}' : f.item + ' — {{ t('editor.no_consumer_tooltip') }}'">
+      <span x-show="summary.extPortOut.includes(f.item)" class="text-xs leading-none">📦</span>
+      <img :src="iconOf(f.item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
+      <span x-text="fmtQty(f.qty)"></span>
+    </span>
+  </template>
+  <template x-for="item in summary.extPortOut.filter(i => !summary.externalOut.some(f => f.item === i))" :key="'epo:'+item">
+    <span @click="openPickerForItem(item, 'consumes')"
+          class="flex items-center gap-1 bg-green-900/40 text-green-300 ring-1 ring-green-500/40
+                 rounded px-2 py-0.5 cursor-pointer hover:opacity-80 transition-opacity"
+          :title="item + ' — {{ t('editor.ext_output_balanced') }}'">
+      <span class="text-xs leading-none">📦</span>
+      <img :src="iconOf(item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
+    </span>
+  </template>
+  <span x-show="summary.externalOut.length===0 && summary.extPortOut.length===0" class="text-slate-600 text-xs">{{ t('editor.none') }}</span>
+</div>
+
+<!-- ═══════════ LOGIN REQUIRED FOR PUBLISH ═══════════ -->
+<div x-show="showLoginForPublish"
+     x-transition:enter="transition ease-out duration-150"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-100"
+     x-transition:leave-start="opacity-100"
+     x-transition:leave-end="opacity-0"
+     class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+     @keydown.escape.window="showLoginForPublish=false">
+  <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6 max-w-sm w-full" @click.stop>
+    <div class="text-3xl mb-3">🌐</div>
+    <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-2">
+      {{ t('complex.publish_auth_title') }}
+    </h2>
+    <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">
+      {{ t('complex.publish_auth_body') }}
+    </p>
+    <div class="flex gap-2">
+      <a href="/?login=1"
+         class="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium
+                rounded-lg text-center transition-colors">
+        {{ t('nav.login') }}
+      </a>
+      <button @click="showLoginForPublish=false"
+              class="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 text-sm font-medium
+                     rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+        {{ t('browse.cancel') }}
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ DANGLING DIALOG ═══════════ -->
+<div x-show="showDangling"
+     class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+  <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6 max-w-md w-full mx-4">
+    <h2 class="font-bold text-slate-800 dark:text-slate-100 mb-2">{{ t('editor.dangling_title') }}</h2>
+    <p class="text-sm text-slate-500 dark:text-slate-400 mb-3">{{ t('editor.dangling_body') }}</p>
+    <div class="flex flex-wrap gap-1.5 mb-4">
+      <template x-for="item in dangling" :key="item">
+        <span class="flex items-center gap-1 bg-amber-50 border border-amber-200
+                     text-amber-800 text-xs rounded-full px-2 py-0.5">
+          <img :src="iconOf(item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
+          <span x-text="item"></span>
+        </span>
+      </template>
+    </div>
+    <div class="flex gap-3 justify-end">
+      <button @click="showDangling=false"
+              class="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 hover:text-slate-800">
+        {{ t('editor.dangling_fix') }}
+      </button>
+      <button @click="showDangling=false; doSave()"
+              class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
+        {{ t('editor.dangling_save') }}
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SCRIPT ═══════════ -->
+<script>
+const _ICON_RECIPE  = '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.474l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115l.094-.319z"/></svg>';
+const _ICON_COMPLEX = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="2" r="1.5" fill="currentColor" stroke="none"/><circle cx="2" cy="13" r="1.5" fill="currentColor" stroke="none"/><circle cx="14" cy="13" r="1.5" fill="currentColor" stroke="none"/><line x1="7.1" y1="3.3" x2="3" y2="11.5"/><line x1="8.9" y1="3.3" x2="13" y2="11.5"/><line x1="3.5" y1="13" x2="12.5" y2="13"/></svg>';
+
+function gcd(a,b) { return b===0?a:gcd(b,a%b); }
+function lcmInt(a,b) { return a/gcd(a,b)*b; }
+
+let _uid = 0;
+function genUid() { return 'n'+(++_uid); }
+
+const NODE_W        = 340;
+const HEADER_H      = 44 + 1;
+const FOOTER_H      = 28;
+const PORT_H        = 26;
+const PORT_CX_LEFT  = 7;
+const PORT_CX_RIGHT = NODE_W - 7;
+
+function complexEditor(complexId, readOnlyMode) {
+  return {
+    complexId:  complexId === 'null' ? null : complexId,
+    readOnly:   readOnlyMode,
+    name:       '',
+    visibility: 'private',
+    forkedFrom: null,
+    likesCount: 0,
+    isLiked:    false,
+    nodes:      [],
+    edges:      [],
+
+    // Picker
+    pickerOpen:       false,
+    pickerContext:    null,
+    pickerNodes:      [],
+    pickerType:       'all',
+    pickerShowHidden: false,
+    pickerLoading:    false,
+
+    externalPorts:      {},
+    idleNodes:          {},
+    manualPartialNodes: {},
+    selected:           {},
+
+    _drag:       null,
+    _pan:        null,
+    _rubberBand: null,
+    _rafId:      null,
+    _pendingMX:  0,
+    _pendingMY:  0,
+
+    loading:     false,
+    error:       null,
+    saving:      false,
+    saveError:   null,
+    guestNotice: false,
+    dangling:    [],
+    showDangling: false,
+    _isDirty:           false,
+    isDark:             localStorage.getItem('coi_theme') === 'dark',
+    showLoginForPublish: false,
+
+    /* ── Init ──────────────────────────────────────────────────── */
+    async init() {
+      if (this.complexId) {
+        await this.loadGraph();
+      } else {
+        const params  = new URLSearchParams(window.location.search);
+        const fromType = params.get('from_type');
+        const fromId   = parseInt(params.get('from_id'), 10);
+        if (fromType && fromId) {
+          await this.loadStartNode(fromType, fromId);
+        }
+      }
+      document.addEventListener('mousemove', this._onMouseMove.bind(this));
+      document.addEventListener('mouseup',   this._onMouseUp.bind(this));
+      this.$nextTick(() => {
+        const s = document.getElementById('canvas-scroll');
+        if (s) { s.scrollLeft = 400; s.scrollTop = 100; }
+      });
+      // Предупреждение о несохранённых изменениях
+      window.addEventListener('beforeunload', (e) => {
+        if (this._isDirty && this.nodes.length > 0) {
+          e.preventDefault(); e.returnValue = '';
+        }
+      });
+      // Отслеживаем изменения
+      this.$watch('nodes', () => { this._isDirty = true; });
+      this.$watch('edges', () => { this._isDirty = true; });
+      this.$watch('name',  () => { this._isDirty = true; });
+    },
+
+    toggleTheme() {
+      this.isDark = !this.isDark;
+      document.documentElement.classList.toggle('dark', this.isDark);
+      localStorage.setItem('coi_theme', this.isDark ? 'dark' : 'light');
+    },
+    switchLang(lc) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('lang', lc);
+      window.location.href = url.href;
+    },
+
+    async loadStartNode(nodeType, nodeId) {
+      try {
+        const r = await fetch(`/api/node/${nodeType}/${nodeId}`);
+        if (!r.ok) throw new Error(await r.text());
+        const n = await r.json();
+        this.nodes = [{
+          _id: genUid(), id: null,
+          node_type:     n.node_type,
+          node_ref_id:   n.node_id,
+          count:         1,
+          pos_x:         800, pos_y: 300,
+          label:         n.machine_name||n.name||'?',
+          inputs:        n.inputs      ||[],
+          outputs:       n.outputs     ||[],
+          maintenance:   n.maintenance ||[],
+          workers:       n.workers,
+          electricity_kw: n.electricity_kw,
+        }];
+      } catch(e) { this.error = e.message; }
+    },
+
+    async loadGraph() {
+      this.loading = true;
+      try {
+        const r = await fetch(`/api/complex/${this.complexId}/graph`);
+        if (!r.ok) throw new Error(await r.text());
+        const data = await r.json();
+        this.name       = data.name;
+        this.visibility = data.visibility || 'private';
+        this.forkedFrom = data.forked_from_id || null;
+        this.likesCount = data.likes_count    || 0;
+        this.nodes = data.nodes.map(n => ({...n, _id: genUid()}));
+        const idMap = {};
+        this.nodes.forEach(n => { idMap[n.id] = n._id; });
+        this.edges = data.edges.map(e => ({
+          ...e, _id: genUid(),
+          from_node_id: idMap[e.from_member_id],
+          to_node_id:   idMap[e.to_member_id],
+        }));
+        const idle = {}, manual = {};
+        for (const n of this.nodes) {
+          if (n.idle_item && n.idle_direction)
+            idle[n._id] = {item: n.idle_item, direction: n.idle_direction};
+          if (n.is_manual_partial) {
+            manual[n._id] = true;
+            const frac = (n.count||1) * (n.efficiency||1);
+            const idx2 = this.nodes.findIndex(m => m._id === n._id);
+            if (idx2 !== -1) this.nodes[idx2] = {...this.nodes[idx2], count: Math.round(frac*100)/100};
+          }
+        }
+        this.idleNodes = idle;
+        this.manualPartialNodes = manual;
+        if (Object.keys(manual).length) this.nodes = [...this.nodes];
+      } catch(e) { this.error = e.message; }
+      finally { this.loading = false; }
+    },
+
+    /* ── Visibility ─────────────────────────────────────────────── */
+    tryPublish() {
+      // Гость или незалогиненный — показать модал авторизации до запроса к серверу
+      if (!window._coiUser || window._coiUser.is_guest) {
+        this.showLoginForPublish = true;
+        return;
+      }
+      this.setVisibility('public');
+    },
+
+    async setVisibility(vis) {
+      if (!this.complexId) return;
+      try {
+        const r = await fetch(`/api/complex/${this.complexId}/visibility`, {
+          method: 'PATCH', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({visibility: vis}),
+        });
+        const d = await r.json();
+        if (!r.ok) {
+          if (d.error === 'limit_reached') { alert(jt('complex.limit_reached', {n: d.limit})); return; }
+          throw new Error(d.error || 'error');
+        }
+        this.visibility = vis;
+      } catch(e) { alert('Error: ' + e.message); }
+    },
+
+    /* ── Like / Fork ────────────────────────────────────────────── */
+    async toggleLike() {
+      if (!this.complexId) return;
+      const method = this.isLiked ? 'DELETE' : 'POST';
+      try {
+        const r = await fetch(`/api/complex/${this.complexId}/like`, {method});
+        if (r.ok) {
+          this.isLiked    = !this.isLiked;
+          this.likesCount = this.likesCount + (this.isLiked ? 1 : -1);
+        }
+      } catch(e) {}
+    },
+
+    async fork() {
+      if (!this.complexId) return;
+      try {
+        const r = await fetch(`/api/complex/${this.complexId}/fork`, {method:'POST'});
+        const d = await r.json();
+        if (!r.ok) {
+          if (d.error === 'limit_reached') { alert(jt('complex.limit_reached', {n: d.limit})); return; }
+          throw new Error(d.error || 'error');
+        }
+        if (confirm('Forked! Go to your complex to edit it?')) {
+          window.location.href = `/complex/${d.slug || d.id}/edit`;
+        }
+      } catch(e) { alert('Error: ' + e.message); }
+    },
+
+    /* ── Picker ─────────────────────────────────────────────────── */
+    async openPicker(node, item, direction) {
+      this.pickerContext = {node_id: node._id, item, direction};
+      this.pickerOpen    = true;
+      await this.reloadPicker();
+    },
+
+    async reloadPicker() {
+      if (!this.pickerContext) return;
+      this.pickerLoading = true;
+      this.pickerNodes   = [];
+      try {
+        const p = new URLSearchParams({
+          item:      this.pickerContext.item,
+          direction: this.pickerContext.direction,
+          type:      this.pickerType,
+          hidden:    this.pickerShowHidden,
+        });
+        const r = await fetch('/api/nodes/for-resource?'+p);
+        this.pickerNodes = await r.json();
+      } finally { this.pickerLoading = false; }
+    },
+
+    // Open picker from summary bar click (no specific node context)
+    openPickerForItem(item, direction) {
+      this.pickerContext = {node_id: null, item, direction};
+      this.pickerOpen    = true;
+      this.reloadPicker();
+    },
+
+    closePicker() { this.pickerOpen=false; this.pickerContext=null; },
+
+    resourceQty(node, item, direction) {
+      if (!item||!direction) return '';
+      const list = direction==='produces'?(node.outputs||[]):(node.inputs||[]);
+      const f = list.find(x=>x.item===item);
+      return f ? this.fmtQty(f.qty_per_min)+'/min' : '';
+    },
+
+    addNodeFromPicker(picked) {
+      if (this.readOnly) return;
+      const ctx = this.pickerContext;
+      this.closePicker();
+
+      let target = this.nodes.find(n=>n.node_type===picked.node_type&&n.node_ref_id===picked.node_id);
+      if (!target) {
+        const ctxNode = this.nodes.find(n=>n._id===ctx.node_id);
+        const baseX   = ctxNode ? ctxNode.pos_x : 800;
+        const baseY   = ctxNode ? ctxNode.pos_y : 300;
+        const offsetX = ctx.direction==='produces' ? -(NODE_W+60) : (NODE_W+60);
+        let idealX    = baseX + offsetX;
+
+        if (idealX < 150) {
+          const shift = 150 - idealX + 350;
+          this.nodes = this.nodes.map(n=>({...n, pos_x: n.pos_x+shift}));
+          idealX += shift;
+          this.$nextTick(()=>{
+            const s = document.getElementById('canvas-scroll');
+            if (s) s.scrollLeft = Math.max(0, s.scrollLeft+shift);
+          });
+        }
+
+        const {x:freeX, y:freeY} = this._findFreePosition(idealX, baseY, null);
+
+        let autoCount = 1;
+        if (ctxNode) {
+          if (ctx.direction==='produces') {
+            const need  = (ctxNode.inputs ||[]).find(f=>f.item===ctx.item)?.qty_per_min||0;
+            const total = need*(ctxNode.count||1);
+            const gives = (picked.outputs||[]).find(f=>f.item===ctx.item)?.qty_per_min||0;
+            if (gives>0) autoCount = Math.max(1,Math.ceil(total/gives));
+          } else {
+            const makes = (ctxNode.outputs||[]).find(f=>f.item===ctx.item)?.qty_per_min||0;
+            const total = makes*(ctxNode.count||1);
+            const uses  = (picked.inputs ||[]).find(f=>f.item===ctx.item)?.qty_per_min||0;
+            if (uses>0) autoCount = Math.max(1,Math.ceil(total/uses));
+          }
+        }
+        target = {
+          _id: genUid(), id: null,
+          node_type:     picked.node_type,
+          node_ref_id:   picked.node_id,
+          count:         autoCount,
+          pos_x: freeX, pos_y: freeY,
+          label:         picked.machine_name||picked.name||'?',
+          inputs:        picked.inputs     ||[],
+          outputs:       picked.outputs    ||[],
+          maintenance:   picked.maintenance||[],
+          workers:       picked.workers,
+          electricity_kw: picked.electricity_kw,
+        };
+        this.nodes = [...this.nodes, target];
+      }
+
+      // ctx.node_id is null when picker was opened from the footer bar — skip explicit edge
+      if (ctx.node_id) {
+        const [fromId, toId] = ctx.direction==='produces'
+          ? [target._id, ctx.node_id]
+          : [ctx.node_id, target._id];
+        this._addEdgeIfNew(fromId, toId, ctx.item);
+      }
+      this._autoConnect(target);
+    },
+
+    _isPickerPortConnected() {
+      if (!this.pickerContext) return false;
+      const {node_id, item, direction} = this.pickerContext;
+      if (direction==='produces') return this.edges.some(e=>e.to_node_id===node_id&&e.resource_item===item);
+      return this.edges.some(e=>e.from_node_id===node_id&&e.resource_item===item);
+    },
+    _isPickerPortExternal() {
+      if (!this.pickerContext) return false;
+      const {node_id, item, direction} = this.pickerContext;
+      const dir = direction==='produces'?'input':'output';
+      return !!this.externalPorts[`${node_id}:${item}:${dir}`];
+    },
+    markExternal() {
+      if (!this.pickerContext) return;
+      const {item, direction} = this.pickerContext;
+      const dir = direction==='produces'?'input':'output';
+      if (this._isPickerPortExternal()) {
+        const copy = {...this.externalPorts};
+        for (const n of this.nodes) delete copy[`${n._id}:${item}:${dir}`];
+        this.externalPorts = copy;
+      } else {
+        const updates = {};
+        for (const n of this.nodes) {
+          const list = dir==='input'?(n.inputs||[]):(n.outputs||[]);
+          if (list.some(f=>f.item===item)) updates[`${n._id}:${item}:${dir}`] = true;
+        }
+        this.externalPorts = {...this.externalPorts, ...updates};
+      }
+      this.closePicker();
+    },
+
+    markIdle() {
+      if (!this.pickerContext) return;
+      const {node_id, item, direction} = this.pickerContext;
+      const dir = direction==='produces'?'input':'output';
+      if (this.manualPartialNodes[node_id]) {
+        const copy = {...this.manualPartialNodes}; delete copy[node_id];
+        this.manualPartialNodes = copy;
+        const idx = this.nodes.findIndex(n=>n._id===node_id);
+        if (idx!==-1) { this.nodes[idx]={...this.nodes[idx],count:Math.max(1,Math.round(this.nodes[idx].count||1))}; this.nodes=[...this.nodes]; }
+      }
+      this.idleNodes = {...this.idleNodes, [node_id]: {item, direction: dir}};
+      this.closePicker();
+    },
+    removeIdle() {
+      if (!this.pickerContext) return;
+      const copy = {...this.idleNodes}; delete copy[this.pickerContext.node_id];
+      this.idleNodes = copy; this.closePicker();
+    },
+    _isPickerPortIdle() {
+      if (!this.pickerContext) return false;
+      const node = this.nodes.find(n=>n._id===this.pickerContext.node_id);
+      if (!node) return false;
+      const dir  = this.pickerContext.direction==='produces'?'input':'output';
+      const idle = this.idleNodes[node._id];
+      return !!(idle&&idle.item===this.pickerContext.item&&idle.direction===dir);
+    },
+    _isPickerPortUnbalanced() {
+      if (!this.pickerContext) return false;
+      const node = this.nodes.find(n=>n._id===this.pickerContext.node_id);
+      if (!node) return false;
+      const dir = this.pickerContext.direction==='produces'?'input':'output';
+      return this.portBalance(node, this.pickerContext.item, dir)==='unbalanced';
+    },
+
+    _addEdgeIfNew(fromId, toId, item) {
+      if (!this.edges.some(e=>e.from_node_id===fromId&&e.to_node_id===toId&&e.resource_item===item)) {
+        this.edges = [...this.edges, {_id:genUid(),id:null,from_node_id:fromId,to_node_id:toId,resource_item:item,lcm_mode:false}];
+        const k1=`${fromId}:${item}:output`, k2=`${toId}:${item}:input`;
+        if (this.externalPorts[k1]||this.externalPorts[k2]) {
+          const copy={...this.externalPorts}; delete copy[k1]; delete copy[k2]; this.externalPorts=copy;
+        }
+      }
+    },
+    _autoConnect(newNode) {
+      for (const out of (newNode.outputs||[]))
+        for (const ex of this.nodes) { if (ex._id===newNode._id) continue; if ((ex.inputs||[]).some(i=>i.item===out.item)) this._addEdgeIfNew(newNode._id,ex._id,out.item); }
+      for (const inp of (newNode.inputs||[]))
+        for (const ex of this.nodes) { if (ex._id===newNode._id) continue; if ((ex.outputs||[]).some(o=>o.item===inp.item)) this._addEdgeIfNew(ex._id,newNode._id,inp.item); }
+    },
+
+    /* ── LCM ──────────────────────────────────────────────────── */
+    canEnableLcm(edge) {
+      const fc = this.edges.filter(e=>e.from_node_id===edge.from_node_id&&e.resource_item===edge.resource_item).length;
+      const tc = this.edges.filter(e=>e.to_node_id===edge.to_node_id&&e.resource_item===edge.resource_item).length;
+      return fc===1&&tc===1;
+    },
+    toggleLcm(edge) {
+      const idx = this.edges.findIndex(e=>e._id===edge._id);
+      if (idx===-1) return;
+      const newMode = !edge.lcm_mode;
+      if (newMode && !this.canEnableLcm(edge)) { alert('LCM can only be enabled when each node has exactly one connection for this resource.'); return; }
+      this.edges[idx]={...this.edges[idx],lcm_mode:newMode};
+      this.edges=[...this.edges];
+      if (newMode) {
+        this._minimizeLcmComponent(this.edges[idx].from_node_id);
+      } else {
+        this._minimizeLcmComponent(edge.from_node_id);
+        this._minimizeLcmComponent(edge.to_node_id);
+      }
+    },
+    // BFS through lcm_mode edges from seedNodeId.
+    // Sets each node in the component to the minimum integer count
+    // satisfying all LCM constraints simultaneously.
+    _minimizeLcmComponent(seedNodeId) {
+      const lcmEdges = this.edges.filter(e=>e.lcm_mode);
+      const ratios   = {};
+      ratios[seedNodeId] = {num:1, den:1};
+      const visited  = new Set([seedNodeId]);
+      const queue    = [seedNodeId];
+      while (queue.length > 0) {
+        const nid  = queue.shift();
+        const curR = ratios[nid];
+        for (const e of lcmEdges) {
+          let nbId, isFromSide;
+          if      (e.from_node_id===nid) { nbId=e.to_node_id;   isFromSide=true;  }
+          else if (e.to_node_id===nid)   { nbId=e.from_node_id; isFromSide=false; }
+          else continue;
+          if (visited.has(nbId)) continue;
+          const fN=this.nodes.find(n=>n._id===e.from_node_id);
+          const tN=this.nodes.find(n=>n._id===e.to_node_id);
+          if (!fN||!tN) continue;
+          const qA=(fN.outputs||[]).find(o=>o.item===e.resource_item)?.qty_per_min||0;
+          const qB=(tN.inputs ||[]).find(i=>i.item===e.resource_item)?.qty_per_min||0;
+          if (!qA||!qB) continue;
+          const ia=Math.round(qA*1000), ib=Math.round(qB*1000), g=gcd(ia,ib);
+          const unitA=ib/g, unitB=ia/g;
+          let nbNum, nbDen;
+          if (isFromSide) { nbNum=curR.num*unitB; nbDen=curR.den*unitA; }
+          else            { nbNum=curR.num*unitA; nbDen=curR.den*unitB; }
+          const g2=gcd(nbNum,nbDen);
+          ratios[nbId]={num:nbNum/g2, den:nbDen/g2};
+          visited.add(nbId); queue.push(nbId);
+        }
+      }
+      let minRef=1;
+      for (const r of Object.values(ratios)) minRef=lcmInt(minRef,r.den);
+      for (const [nid,r] of Object.entries(ratios)) {
+        const newCount=(minRef/r.den)*r.num;
+        const i=this.nodes.findIndex(n=>n._id===nid);
+        if (i!==-1) this.nodes[i]={...this.nodes[i],count:Math.max(1,newCount)};
+      }
+      this.nodes=[...this.nodes];
+    },
+
+    /* ── Canvas ─────────────────────────────────────────────────── */
+    onCanvasMouseDown(e) {
+      if (e.button!==0) return;
+      if (e.target.closest('.node-tile')) return;
+      if (e.target.closest('[data-eid]')) return;
+      if (e.shiftKey) {
+        const additive=e.ctrlKey;
+        if (!additive) this.selected={};
+        const wrap=document.getElementById('canvas-wrap');
+        const wRect=wrap.getBoundingClientRect();
+        const cx=e.clientX-wRect.left, cy=e.clientY-wRect.top;
+        this._rubberBand={startX:cx,startY:cy,curX:cx,curY:cy,additive};
+        e.preventDefault(); return;
+      }
+      this.selected={};
+      const scroll=document.getElementById('canvas-scroll');
+      this._pan={startX:e.clientX+scroll.scrollLeft,startY:e.clientY+scroll.scrollTop};
+      e.preventDefault();
+    },
+
+    startDrag(e, node) {
+      if (e.button!==0||this.readOnly) return;
+      if (e.ctrlKey) {
+        if (this.selected[node._id]) { const c={...this.selected}; delete c[node._id]; this.selected=c; }
+        else this.selected={...this.selected,[node._id]:true};
+        e.preventDefault(); return;
+      }
+      if (!this.selected[node._id]) this.selected={[node._id]:true};
+      const scroll=document.getElementById('canvas-scroll');
+      const wrap=document.getElementById('canvas-wrap');
+      const wRect=wrap.getBoundingClientRect();
+      const mx=e.clientX-wRect.left+scroll.scrollLeft, my=e.clientY-wRect.top+scroll.scrollTop;
+      const offsets=this.nodes.filter(n=>this.selected[n._id]).map(n=>({_id:n._id,ox:mx-n.pos_x,oy:my-n.pos_y}));
+      this._drag={offsets}; e.preventDefault();
+    },
+
+    _onMouseMove(e) {
+      if (this._rubberBand) {
+        const wrap=document.getElementById('canvas-wrap'), wRect=wrap.getBoundingClientRect();
+        this._rubberBand={...this._rubberBand,curX:e.clientX-wRect.left,curY:e.clientY-wRect.top};
+        return;
+      }
+      if (this._pan) {
+        const scroll=document.getElementById('canvas-scroll');
+        scroll.scrollLeft=this._pan.startX-e.clientX; scroll.scrollTop=this._pan.startY-e.clientY;
+        return;
+      }
+      if (!this._drag) return;
+      const scroll=document.getElementById('canvas-scroll');
+      const wrap=document.getElementById('canvas-wrap'), wRect=wrap.getBoundingClientRect();
+      this._pendingMX=e.clientX-wRect.left+scroll.scrollLeft;
+      this._pendingMY=e.clientY-wRect.top+scroll.scrollTop;
+      if (!this._rafId) {
+        this._rafId=requestAnimationFrame(()=>{
+          this._rafId=null;
+          if (!this._drag) return;
+          const mx=this._pendingMX, my=this._pendingMY;
+          const updates={};
+          for (const {_id,ox,oy} of this._drag.offsets) updates[_id]={pos_x:Math.max(10,mx-ox),pos_y:Math.max(10,my-oy)};
+          this.nodes=this.nodes.map(n=>updates[n._id]?{...n,...updates[n._id]}:n);
+        });
+      }
+    },
+
+    _onMouseUp() {
+      if (this._rubberBand) {
+        const rb=this._rubberBand; this._rubberBand=null;
+        const x1=Math.min(rb.startX,rb.curX),y1=Math.min(rb.startY,rb.curY);
+        const x2=Math.max(rb.startX,rb.curX),y2=Math.max(rb.startY,rb.curY);
+        const toSelect={};
+        for (const n of this.nodes) {
+          const el=document.querySelector(`.node-tile[data-nid="${n._id}"]`);
+          if (!el) continue;
+          if (n.pos_x>=x1&&n.pos_y>=y1&&n.pos_x+el.offsetWidth<=x2&&n.pos_y+el.offsetHeight<=y2) toSelect[n._id]=true;
+        }
+        if (rb.additive) {
+          const merged={...this.selected};
+          for (const id of Object.keys(toSelect)) { if (merged[id]) delete merged[id]; else merged[id]=true; }
+          this.selected=merged;
+        } else { this.selected=toSelect; }
+        return;
+      }
+      this._drag=null; this._pan=null;
+    },
+
+    /* ── Node ops ───────────────────────────────────────────────── */
+    removeNode(node) {
+      if (this.readOnly || this.nodes.length<=1) return;
+      this.nodes=this.nodes.filter(n=>n._id!==node._id);
+      this.edges=this.edges.filter(e=>e.from_node_id!==node._id&&e.to_node_id!==node._id);
+      const {[node._id]:_i,...ri}=this.idleNodes; this.idleNodes=ri;
+      const {[node._id]:_s,...rs}=this.selected;  this.selected=rs;
+    },
+
+    setCount(node, val) {
+      if (this.readOnly) return;
+      const isMP=this.isManualPartial(node);
+      const c=isMP?Math.max(0.01,Math.round(parseFloat(val)*100)/100||0.01):Math.max(1,parseInt(val,10)||1);
+      const idx=this.nodes.findIndex(n=>n._id===node._id); if (idx===-1) return;
+      this.nodes[idx]={...this.nodes[idx],count:c};
+      if (isMP) { this.nodes=[...this.nodes]; return; }
+      for (const e of this.edges) {
+        if (!e.lcm_mode) continue;
+        if (e.from_node_id!==node._id&&e.to_node_id!==node._id) continue;
+        const fN=this.nodes.find(n=>n._id===e.from_node_id), tN=this.nodes.find(n=>n._id===e.to_node_id);
+        if (!fN||!tN) continue;
+        const qA=(fN.outputs||[]).find(o=>o.item===e.resource_item)?.qty_per_min||0;
+        const qB=(tN.inputs||[]).find(i=>i.item===e.resource_item)?.qty_per_min||0;
+        if (!qA||!qB) continue;
+        if (e.from_node_id===node._id) {
+          const ib=this.nodes.findIndex(n=>n._id===tN._id);
+          if (ib!==-1) this.nodes[ib]={...this.nodes[ib],count:Math.max(1,Math.ceil(c*qA/qB))};
+        } else {
+          const ia=this.nodes.findIndex(n=>n._id===fN._id);
+          if (ia!==-1) this.nodes[ia]={...this.nodes[ia],count:Math.max(1,Math.ceil(c*qB/qA))};
+        }
+      }
+      this.nodes=[...this.nodes];
+    },
+
+    /* ── SVG edges ──────────────────────────────────────────────── */
+    _portPos(nodeId, direction, item) {
+      const node=this.nodes.find(n=>n._id===nodeId); if (!node) return {x:0,y:0};
+      const list=direction==='output'?(node.outputs||[]):(node.inputs||[]);
+      const i=Math.max(0,list.findIndex(f=>f.item===item));
+      const x=direction==='output'?node.pos_x+PORT_CX_RIGHT:node.pos_x+PORT_CX_LEFT;
+      const y=node.pos_y+HEADER_H+i*PORT_H+PORT_H/2;
+      return {x,y};
+    },
+
+    get edgePaths() {
+      const pc={},si={};
+      for (const e of this.edges) { const k=`${e.from_node_id}→${e.to_node_id}`; pc[k]=(pc[k]||0)+1; }
+      return this.edges.map(e=>{
+        const k=`${e.from_node_id}→${e.to_node_id}`;
+        if (si[k]===undefined) si[k]=0; else si[k]++;
+        const pIdx=si[k], pNum=pc[k], STEP=36;
+        const off=pNum>1?(pIdx-(pNum-1)/2)*STEP:0;
+        const from=this._portPos(e.from_node_id,'output',e.resource_item);
+        const to  =this._portPos(e.to_node_id,  'input', e.resource_item);
+        const dx  =Math.max(60,Math.abs(to.x-from.x)*0.45);
+        const cp1y=from.y+off, cp2y=to.y+off;
+        const path=`M ${from.x} ${from.y} C ${from.x+dx} ${cp1y}, ${to.x-dx} ${cp2y}, ${to.x} ${to.y}`;
+        const midX=(from.x+to.x)/2, midY=(from.y+3*cp1y+3*cp2y+to.y)/8;
+        return {...e,path,midX,midY};
+      });
+    },
+
+    get edgeSvgContent() {
+      const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      return this.edgePaths.map(ep=>{
+        const sc=ep.lcm_mode?'#f59e0b':'#94a3b8', arr=ep.lcm_mode?'url(#arr-lcm)':'url(#arr)';
+        const bg=ep.lcm_mode?'#fef3c7':'white',   bc=ep.lcm_mode?'#f59e0b':'#cbd5e1';
+        const tc=ep.lcm_mode?'#b45309':'#64748b';
+        const lbl=ep.resource_item.length>9?ep.resource_item.slice(0,9)+'…':ep.resource_item;
+        const tip=(ep.lcm_mode?'LCM active · ':'')+esc(ep.resource_item)+' · click label: LCM';
+        return `<g>
+  <path d="${ep.path}" fill="none" stroke="transparent" stroke-width="16"/>
+  <path d="${ep.path}" fill="none" stroke="${sc}" stroke-width="2" marker-end="${arr}"/>
+  <g transform="translate(${ep.midX},${ep.midY})" style="cursor:pointer"
+     data-eid="${ep._id}" data-act="lcm">
+    <rect x="-28" y="-11" width="56" height="22" rx="5" fill="${bg}" stroke="${bc}" stroke-width="1.5"/>
+    <text text-anchor="middle" dominant-baseline="middle" font-size="9.5"
+          fill="${tc}" font-family="ui-sans-serif,system-ui,sans-serif">${esc(lbl)}</text>
+    <title>${tip}</title>
+  </g>
+</g>`;
+      }).join('\n');
+    },
+
+    onEdgeClick(e) {
+      const el=e.target.closest('[data-eid]'); if (!el) return;
+      const edge=this.edges.find(e=>e._id===el.dataset.eid); if (!edge) return;
+      if (el.dataset.act==='lcm') this.toggleLcm(edge);
+      e.stopPropagation();
+    },
+
+    isPortConnected(node, item, direction) {
+      if (direction==='output') return this.edges.some(e=>e.from_node_id===node._id&&e.resource_item===item);
+      return this.edges.some(e=>e.to_node_id===node._id&&e.resource_item===item);
+    },
+    isPortExternal(node, item, direction) { return !!this.externalPorts[`${node._id}:${item}:${direction}`]; },
+    hasLcm(node)  { return this.edges.some(e=>e.lcm_mode&&(e.from_node_id===node._id||e.to_node_id===node._id)); },
+    hasIdle(node) { return !!this.idleNodes[node._id]; },
+    isCountLocked(node) { return this.hasLcm(node)||this.hasIdle(node); },
+
+    /* ── Idle solver ────────────────────────────────────────────── */
+    get _idleEffectiveMap() {
+      const result={};
+      for (const n of this.nodes) result[n._id]=n.count||1;
+      const portIdleList=this.nodes.filter(n=>this.idleNodes[n._id]);
+      if (portIdleList.length===0) return result;
+      for (let iter=0;iter<60;iter++) {
+        let maxChange=0;
+        for (const node of portIdleList) {
+          const {item,direction}=this.idleNodes[node._id];
+          let frac=0;
+          if (direction==='output') {
+            const myRate=(node.outputs||[]).find(o=>o.item===item)?.qty_per_min||0; if (!myRate) continue;
+            let demand=0,supply=0;
+            for (const n of this.nodes) {
+              const m=result[n._id];
+              for (const inp of (n.inputs||[])) if (inp.item===item) demand+=(inp.qty_per_min||0)*m;
+              if (n._id!==node._id) for (const out of (n.outputs||[])) if (out.item===item) supply+=(out.qty_per_min||0)*m;
+            }
+            frac=Math.max(0,demand-supply)/myRate;
+          } else {
+            const myRate=(node.inputs||[]).find(i=>i.item===item)?.qty_per_min||0; if (!myRate) continue;
+            let supply=0,demand=0;
+            for (const n of this.nodes) {
+              const m=result[n._id];
+              for (const out of (n.outputs||[])) if (out.item===item) supply+=(out.qty_per_min||0)*m;
+              if (n._id!==node._id) for (const inp of (n.inputs||[])) if (inp.item===item) demand+=(inp.qty_per_min||0)*m;
+            }
+            frac=Math.max(0,supply-demand)/myRate;
+          }
+          const newVal=Math.max(0.0001,frac);
+          maxChange=Math.max(maxChange,Math.abs(result[node._id]-newVal));
+          result[node._id]=newVal;
+        }
+        if (maxChange<0.00005) break;
+      }
+      return result;
+    },
+
+    nodeEffectiveCount(node) {
+      if (this.isManualPartial(node)) return Math.max(0.0001,node.count||1);
+      if (!this.idleNodes[node._id])  return node.count||1;
+      return this._idleEffectiveMap[node._id]??(node.count||1);
+    },
+    nodeIdleCount(node) {
+      if (this.isManualPartial(node)) return Math.max(1,Math.ceil(node.count||1));
+      if (!this.idleNodes[node._id])  return node.count||1;
+      return Math.max(1,Math.ceil(this._idleEffectiveMap[node._id]??1));
+    },
+    nodeEfficiency(node) {
+      if (this.isManualPartial(node)) { const c=node.count||1,ci=Math.max(1,Math.ceil(c)); return Math.min(1,Math.max(0.0001,c/ci)); }
+      if (!this.idleNodes[node._id]) return 1;
+      const frac=this._idleEffectiveMap[node._id]??0, count=Math.max(1,Math.ceil(frac));
+      return Math.min(1,Math.max(0.0001,frac/count));
+    },
+    isManualPartial(node) { return !!this.manualPartialNodes[node._id]; },
+
+    toggleManualPartial(node) {
+      if (this.readOnly) return;
+      const idx=this.nodes.findIndex(n=>n._id===node._id); if (idx===-1) return;
+      if (this.isManualPartial(node)) {
+        this.nodes[idx]={...this.nodes[idx],count:Math.max(1,Math.ceil(+(node.count)||1))};
+        const copy={...this.manualPartialNodes}; delete copy[node._id]; this.manualPartialNodes=copy;
+      } else {
+        const wasIdle=!!this.idleNodes[node._id];
+        let frac;
+        if (wasIdle) { const m=this._idleEffectiveMap; frac=Math.max(0.01,Math.round((m[node._id]??(node.count||1))*100)/100); }
+        else frac=Math.max(0.01,+(node.count)||1);
+        this.nodes[idx]={...this.nodes[idx],count:frac};
+        this.manualPartialNodes={...this.manualPartialNodes,[node._id]:true};
+        if (wasIdle) { const idle={...this.idleNodes}; delete idle[node._id]; this.idleNodes=idle; }
+      }
+      this.nodes=[...this.nodes];
+    },
+
+    /* ── Port balance ───────────────────────────────────────────── */
+    portBalance(node, item, direction) {
+      const edges=this.edges;
+      if (this.isPortExternal(node,item,direction)) return 'external';
+      const idle=this.idleNodes[node._id];
+      if (idle&&idle.item===item&&idle.direction===direction) return 'idle';
+      const adj={};
+      for (const n of this.nodes) adj[n._id]=[];
+      let nodeConnected=false;
+      for (const e of edges) {
+        if (e.resource_item!==item) continue;
+        if (adj[e.from_node_id]) adj[e.from_node_id].push(e.to_node_id);
+        if (adj[e.to_node_id])   adj[e.to_node_id].push(e.from_node_id);
+        if (direction==='output'&&e.from_node_id===node._id) nodeConnected=true;
+        if (direction==='input' &&e.to_node_id  ===node._id) nodeConnected=true;
+      }
+      if (!nodeConnected) return 'open';
+      const visited=new Set([node._id]), queue=[node._id];
+      while (queue.length) { const cur=queue.shift(); for (const nb of (adj[cur]||[])) { if (!visited.has(nb)) { visited.add(nb); queue.push(nb); } } }
+      let net=0;
+      for (const n of this.nodes) {
+        if (!visited.has(n._id)) continue;
+        const m=this.nodeEffectiveCount(n);
+        for (const o of (n.outputs||[])) if (o.item===item) net+=(o.qty_per_min||0)*m;
+        for (const i of (n.inputs ||[])) if (i.item===item) net-=(i.qty_per_min||0)*m;
+      }
+      if (Math.abs(net)<0.001) return 'balanced';
+      if (net<0) return direction==='output'?'balanced':'unbalanced';
+      return direction==='output'?'unbalanced':'balanced';
+    },
+
+    _findFreePosition(idealX, idealY, excludeId) {
+      const W=NODE_W+40, H=210;
+      let x=idealX, y=idealY;
+      for (let i=0;i<20;i++) {
+        const hit=this.nodes.some(n=>{ if (n._id===excludeId) return false; return Math.abs(n.pos_x-x)<W&&Math.abs(n.pos_y-y)<H; });
+        if (!hit) return {x,y};
+        y+=H;
+      }
+      return {x,y};
+    },
+
+    /* ── Summary ─────────────────────────────────────────────────── */
+    get summary() {
+      const net={},maint={};
+      let totalWorkers=0,totalElec=0;
+      for (const node of this.nodes) {
+        const m=this.nodeEffectiveCount(node), mW=this.hasIdle(node)?this.nodeIdleCount(node):(node.count||1);
+        for (const o of (node.outputs||[])) net[o.item]=(net[o.item]||0)+(o.qty_per_min||0)*m;
+        for (const i of (node.inputs ||[])) net[i.item]=(net[i.item]||0)-(i.qty_per_min||0)*m;
+        for (const x of (node.maintenance||[])) maint[x.item]=(maint[x.item]||0)+(x.rate_per_min||0)*m;
+        totalWorkers+=(node.workers||0)*mW;
+        totalElec   +=(node.electricity_kw||0)*m;
+      }
+      // Collect items with explicit external port markers (green ports)
+      const extPortIn=new Set(), extPortOut=new Set();
+      for (const [key,val] of Object.entries(this.externalPorts)) {
+        if (!val) continue;
+        const lc=key.lastIndexOf(':'), fc=key.indexOf(':');
+        const dir=key.slice(lc+1), item=key.slice(fc+1,lc);
+        if (dir==='input')  extPortIn.add(item);
+        if (dir==='output') extPortOut.add(item);
+      }
+      // Port-idle (purple port): remove only the specific balanced resource from net
+      for (const {item} of Object.values(this.idleNodes)) delete net[item];
+
+      // Manual partial: fractional counts produce noise in ALL resources of the node;
+      // at large volumes this easily exceeds 0.1. In CoI no meaningful flow is <1/min,
+      // so when any manual-partial node exists use threshold 1 instead of 0.001.
+      const hasManual=Object.values(this.manualPartialNodes).some(Boolean);
+      const thresh=hasManual?1:0.001;
+
+      // For port-idle residuals only: round to 2 d.p. to catch small float noise
+      if (!hasManual) { for (const k of Object.keys(net)) net[k]=Math.round(net[k]*100)/100; }
+
+      return {
+        externalIn:  Object.entries(net).filter(([,v])=>v<-thresh).map(([item,qty])=>({item,qty:-qty})).sort((a,b)=>a.item.localeCompare(b.item)),
+        externalOut: Object.entries(net).filter(([,v])=>v> thresh).map(([item,qty])=>({item,qty})).sort((a,b)=>a.item.localeCompare(b.item)),
+        extPortIn:  [...extPortIn].sort((a,b)=>a.localeCompare(b)),
+        extPortOut: [...extPortOut].sort((a,b)=>a.localeCompare(b)),
+        totalWorkers, totalElec,
+        maintenance: Object.entries(maint).map(([item,rate])=>({item,rate:+rate.toFixed(3)})).sort((a,b)=>a.item.localeCompare(b.item)),
+      };
+    },
+
+    scaledFlows(node, direction) {
+      const edges=this.edges;
+      const list=direction==='input'?(node.inputs||[]):(node.outputs||[]);
+      const m=this.nodeEffectiveCount(node);
+      return list.map(f=>({
+        ...f,
+        _connected: edges.some(e=>direction==='input'?e.to_node_id===node._id&&e.resource_item===f.item:e.from_node_id===node._id&&e.resource_item===f.item),
+        scaled: f.qty_per_min!=null ? +(f.qty_per_min*m).toFixed(3) : null,
+      }));
+    },
+
+    fmtQty(v) {
+      if (v==null) return '';
+      const n=parseFloat(v);
+      return Number.isInteger(n)?String(n):n.toFixed(n<10?2:1);
+    },
+
+    iconOf(name) { return '/static/icons/'+(name||'').replaceAll(' ','_')+'.png'; },
+
+    /* ── Save ─────────────────────────────────────────────────────── */
+    save(exitAfter=false) {
+      if (this.readOnly || !this.name.trim()) return;
+      this._exitAfterSave = exitAfter;
+      const unconnected=new Set();
+      for (const node of this.nodes) {
+        for (const o of (node.outputs||[]))
+          if (!this.isPortExternal(node,o.item,'output')&&!this.edges.some(e=>e.from_node_id===node._id&&e.resource_item===o.item)) unconnected.add(o.item);
+        for (const i of (node.inputs||[]))
+          if (!this.isPortExternal(node,i.item,'input')&&!this.edges.some(e=>e.to_node_id===node._id&&e.resource_item===i.item)) unconnected.add(i.item);
+      }
+      if (unconnected.size>0) { this.dangling=[...unconnected].sort((a,b)=>a.localeCompare(b)); this.showDangling=true; return; }
+      this.doSave();
+    },
+
+    async doSave() {
+      if (this.readOnly) return;
+      this.saving=true; this.saveError=null;
+      try {
+        const payload={
+          name: this.name.trim(),
+          nodes: this.nodes.map(n=>({
+            _id:               n._id,
+            node_type:         n.node_type,
+            node_ref_id:       n.node_ref_id,
+            count:             this.hasIdle(n)||this.isManualPartial(n)?this.nodeIdleCount(n):n.count,
+            pos_x:             n.pos_x,
+            pos_y:             n.pos_y,
+            efficiency:        this.nodeEfficiency(n),
+            idle_item:         this.idleNodes[n._id]?.item      ||null,
+            idle_direction:    this.idleNodes[n._id]?.direction ||null,
+            is_manual_partial: this.isManualPartial(n),
+          })),
+          edges: this.edges.map(e=>({
+            from_node_id:  e.from_node_id,
+            to_node_id:    e.to_node_id,
+            resource_item: e.resource_item,
+            lcm_mode:      e.lcm_mode,
+          })),
+        };
+        const url=this.complexId?`/api/complex/${this.complexId}`:'/api/complex';
+        const method=this.complexId?'PUT':'POST';
+        const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        if (!r.ok) {
+          const d=await r.json();
+          if (d.error==='limit_reached') { throw new Error(jt('complex.limit_reached',{n:d.limit})); }
+          throw new Error(d.error||await r.text());
+        }
+        const result=await r.json();
+        if (!this.complexId) {
+          this.complexId=result.id;
+          const editSlug = result.slug || result.id;
+          window.history.replaceState({},'',`/complex/${editSlug}/edit`);
+        }
+        this.saveError=null;
+        this._isDirty=false;
+        // Показать предупреждение гостю (один раз) при выходе
+        if (this._exitAfterSave && window._coiUser && window._coiUser.is_guest && !sessionStorage.getItem('_guestNoticeShown')) {
+          sessionStorage.setItem('_guestNoticeShown', '1');
+          this.guestNotice = true;
+          return;  // ждём пока прочитает
+        }
+        if (this._exitAfterSave) window.location.href='/';
+      } catch(e) { this.saveError=e.message; }
+      finally { this.saving=false; }
+    },
+  };
+}
+</script>
+</body>
+</html>

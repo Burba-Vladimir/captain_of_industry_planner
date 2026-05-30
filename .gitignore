@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Temp files
+*.tmp
+*.bak
+new 1.txt
+
+# Secrets (never commit!)
+*.pem
+*.key
+
+# Database dumps
+*.dump
+*.sql.gz
+
+# Pytest cache
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# MyPy
+.mypy_cache/
+
+# Playwright
+test-results/
+playwright-report/

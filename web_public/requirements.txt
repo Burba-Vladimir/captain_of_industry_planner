@@ -1,0 +1,8 @@
+flask>=3.0
+psycopg2-binary>=2.9
+authlib>=1.3          # OAuth (Google, Steam)
+flask-login>=0.6      # Session management
+flask-babel>=4.0      # i18n / l10n
+flask-limiter>=3.5    # Rate limiting
+requests>=2.31        # HTTP client (OAuth callbacks)
+python-dotenv>=1.0    # .env support for local dev
