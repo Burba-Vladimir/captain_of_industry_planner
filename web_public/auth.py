@@ -30,13 +30,17 @@ oauth    = OAuth()
 def init_oauth(app):
     oauth.init_app(app)
 
-    oauth.register(
-        name="google",
-        client_id=os.environ["GOOGLE_CLIENT_ID"],
-        client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
-        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-        client_kwargs={"scope": "openid email profile"},
-    )
+    # Google OAuth — регистрируем только если credentials заданы
+    _google_id     = os.environ.get("GOOGLE_CLIENT_ID")
+    _google_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
+    if _google_id and _google_secret:
+        oauth.register(
+            name="google",
+            client_id=_google_id,
+            client_secret=_google_secret,
+            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+            client_kwargs={"scope": "openid email profile"},
+        )
     # Steam использует OpenID 2.0 (не OAuth 2.0), обрабатываем вручную
     # (authlib не поддерживает OpenID 2.0 напрямую)
 
