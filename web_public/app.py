@@ -47,8 +47,9 @@ def _tokenize_query(q: str) -> list:
         m = re.match(r'(in|out|name):\s*(?:"([^"]*)"|(\S*))', q[i:], re.IGNORECASE)
         if m:
             prefix = m.group(1).lower()
-            value = (m.group(2) if m.group(2) is not None else m.group(3)).lower()
-            tokens.append(('prefix', prefix, value))
+            exact  = m.group(2) is not None   # было ли значение в кавычках
+            value  = (m.group(2) if exact else m.group(3)).lower()
+            tokens.append(('prefix', prefix, value, exact))
             i += m.end()
             continue
         # Обычное слово
@@ -109,7 +110,7 @@ def _parse_search(q: str):
             return ('match', None, '')
         consume()
         if isinstance(t, tuple) and t[0] == 'prefix':
-            return ('match', t[1], t[2])
+            return ('match', t[1], t[2], t[3] if len(t) > 3 else False)
         if isinstance(t, tuple) and t[0] == 'str':
             return ('match', None, t[1])
         return ('match', None, str(t).lower())
@@ -141,19 +142,20 @@ def _eval_search(ast, row: dict) -> bool:
         ])).lower()
         return value in haystack
     if kind == 'match':
-        _, prefix, value = ast
+        prefix = ast[1]; value = ast[2]; exact = ast[3] if len(ast) > 3 else False
         if not value:
             return True
         inputs  = [x['item'].lower() for x in (row.get('inputs')  or [])]
         outputs = [x['item'].lower() for x in (row.get('outputs') or [])]
         name    = (row.get('machine_name') or row.get('name') or '').lower()
+        def match(s): return s == value if exact else value in s
         if prefix == 'in':
-            return any(value in s for s in inputs)
+            return any(match(s) for s in inputs)
         if prefix == 'out':
-            return any(value in s for s in outputs)
+            return any(match(s) for s in outputs)
         if prefix == 'name':
-            return value in name
-        return value in ' '.join(filter(None, [name] + inputs + outputs))
+            return match(name)
+        return any(match(s) for s in [name] + inputs + outputs)
     return True
 
 from flask import Flask, abort, g, jsonify, redirect, render_template, request, session, url_for

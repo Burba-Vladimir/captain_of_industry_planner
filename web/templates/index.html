@@ -505,7 +505,7 @@ function _tokQ(q) {
       t.push({k:'s', v:q.slice(i+1, end).toLowerCase()}); i = end + 1; continue;
     }
     const pm = q.slice(i).match(/^(in|out|name):\s*(?:"([^"]*)"|(\S*))/i);
-    if (pm) { t.push({k:'p', p:pm[1].toLowerCase(), v:(pm[2]??pm[3]).toLowerCase()}); i += pm[0].length; continue; }
+    if (pm) { t.push({k:'p', p:pm[1].toLowerCase(), v:(pm[2]??pm[3]).toLowerCase(), exact:pm[2]!==undefined}); i += pm[0].length; continue; }
     const wm = q.slice(i).match(/^[^ \t&|()"]+/);
     if (wm) { t.push({k:'s', v:wm[0].toLowerCase()}); i += wm[0].length; } else i++;
   }
@@ -535,7 +535,7 @@ function _parseQ(q) {
     if (peek()==='(') { next(); const n=expr(); if(peek()===')') next(); return n; }
     const t=next();
     if (!t) return {op:'match',p:null,v:''};
-    if (t.k==='p') return {op:'match',p:t.p,v:t.v};
+    if (t.k==='p') return {op:'match',p:t.p,v:t.v,exact:t.exact||false};
     if (t.k==='s') return {op:'match',p:null,v:t.v};
     return {op:'match',p:null,v:String(t).toLowerCase()};
   }
@@ -551,14 +551,15 @@ function _evalQ(ast, node) {
     return fields.join(' ').toLowerCase().includes(ast.v);
   }
   if (ast.op==='match') {
-    const {p,v}=ast; if (!v) return true;
+    const {p,v,exact}=ast; if (!v) return true;
     const ins=(node.inputs||[]).map(x=>x.item.toLowerCase());
     const outs=(node.outputs||[]).map(x=>x.item.toLowerCase());
     const nm=(node.machine_name||node.name||'').toLowerCase();
-    if (p==='in')   return ins.some(s=>s.includes(v));
-    if (p==='out')  return outs.some(s=>s.includes(v));
-    if (p==='name') return nm.includes(v);
-    return [nm,...ins,...outs].join(' ').includes(v);
+    const hit=s=>exact?s===v:s.includes(v);
+    if (p==='in')   return ins.some(hit);
+    if (p==='out')  return outs.some(hit);
+    if (p==='name') return hit(nm);
+    return [nm,...ins,...outs].some(hit);
   }
   return true;
 }
