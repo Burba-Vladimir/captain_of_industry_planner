@@ -11,9 +11,147 @@ from __future__ import annotations
 import decimal
 import json
 import os
+import re
 
 from dotenv import load_dotenv
 load_dotenv()  # загрузить .env до инициализации Flask
+
+
+# ─────────────────────────────────────────────────────────────────
+# Парсер поисковых запросов
+# Синтаксис: in:ресурс  out:ресурс  name:машина  & | ()
+# Без спецсимволов — legacy-поиск по всем полям.
+# ─────────────────────────────────────────────────────────────────
+
+def _tokenize_query(q: str) -> list:
+    """Разбивает строку запроса на токены."""
+    tokens = []
+    i = 0
+    while i < len(q):
+        c = q[i]
+        if c in ' \t':
+            i += 1
+            continue
+        if c in '&|()':
+            tokens.append(c)
+            i += 1
+            continue
+        if c == '"':
+            end = q.find('"', i + 1)
+            if end == -1:
+                end = len(q)
+            tokens.append(('str', q[i + 1:end].lower()))
+            i = end + 1
+            continue
+        # Префикс in:/out:/name: (возможно с кавычками)
+        m = re.match(r'(in|out|name):\s*(?:"([^"]*)"|(\S*))', q[i:], re.IGNORECASE)
+        if m:
+            prefix = m.group(1).lower()
+            value = (m.group(2) if m.group(2) is not None else m.group(3)).lower()
+            tokens.append(('prefix', prefix, value))
+            i += m.end()
+            continue
+        # Обычное слово
+        m = re.match(r'[^ \t&|()"]+', q[i:])
+        if m:
+            tokens.append(('str', m.group(0).lower()))
+            i += m.end()
+        else:
+            i += 1
+    return tokens
+
+
+def _parse_search(q: str):
+    """Парсит запрос в AST. Возвращает None при пустом запросе."""
+    q = q.strip()
+    if not q:
+        return None
+    # Нет спецсимволов — legacy-режим
+    if not re.search(r'(?:in|out|name):|[&|(]', q, re.IGNORECASE):
+        exact = q.startswith('"') and q.endswith('"') and len(q) > 2
+        value = q[1:-1] if exact else q
+        return ('legacy', exact, value.lower())
+
+    tokens = _tokenize_query(q)
+    pos = [0]
+
+    def peek():
+        return tokens[pos[0]] if pos[0] < len(tokens) else None
+
+    def consume():
+        t = tokens[pos[0]]; pos[0] += 1; return t
+
+    def parse_expr():
+        left = parse_term()
+        while peek() == '|':
+            consume()
+            right = parse_term()
+            left = ('or', left, right)
+        return left
+
+    def parse_term():
+        left = parse_factor()
+        while peek() == '&':
+            consume()
+            right = parse_factor()
+            left = ('and', left, right)
+        return left
+
+    def parse_factor():
+        if peek() == '(':
+            consume()
+            node = parse_expr()
+            if peek() == ')':
+                consume()
+            return node
+        t = peek()
+        if t is None:
+            return ('match', None, '')
+        consume()
+        if isinstance(t, tuple) and t[0] == 'prefix':
+            return ('match', t[1], t[2])
+        if isinstance(t, tuple) and t[0] == 'str':
+            return ('match', None, t[1])
+        return ('match', None, str(t).lower())
+
+    return parse_expr()
+
+
+def _eval_search(ast, row: dict) -> bool:
+    """Проверяет строку данных против AST запроса."""
+    if ast is None:
+        return True
+    kind = ast[0]
+    if kind == 'or':
+        return _eval_search(ast[1], row) or _eval_search(ast[2], row)
+    if kind == 'and':
+        return _eval_search(ast[1], row) and _eval_search(ast[2], row)
+    if kind == 'legacy':
+        _, exact, value = ast
+        haystack = ' '.join(filter(None, [
+            row.get('machine_name') or '',
+            row.get('name') or '',
+            ' '.join(x['item'] for x in (row.get('inputs') or [])),
+            ' '.join(x['item'] for x in (row.get('outputs') or [])),
+        ])).lower()
+        if exact:
+            return value in haystack.split() or value == haystack
+        return value in haystack
+    if kind == 'match':
+        _, prefix, value = ast
+        if not value:
+            return True
+        inputs  = [x['item'].lower() for x in (row.get('inputs')  or [])]
+        outputs = [x['item'].lower() for x in (row.get('outputs') or [])]
+        name    = (row.get('machine_name') or row.get('name') or '').lower()
+        if prefix == 'in':
+            return any(value in s for s in inputs)
+        if prefix == 'out':
+            return any(value in s for s in outputs)
+        if prefix == 'name':
+            return value in name
+        return value in ' '.join(filter(None, [name] + inputs + outputs))
+    return True
 
 from flask import Flask, abort, g, jsonify, redirect, render_template, request, session, url_for
 import psycopg2
@@ -489,11 +627,12 @@ def complex_view(slug: str):
 
 @app.route("/api/nodes")
 def api_nodes():
-    q           = request.args.get("q",      "").strip().lower()
+    q_raw       = request.args.get("q",      "").strip()
     type_filter = request.args.get("type",   "all")
     show_hidden = request.args.get("hidden", "false") == "true"   # true = include hidden items
     page        = max(1, int(request.args.get("page", "1")))
     per_page    = min(100, max(10, int(request.args.get("per_page", "50"))))
+    search_ast  = _parse_search(q_raw)
 
     # Загружаем скрытые рецепты пользователя — всегда (нужно для поля deprecated в ответе)
     hidden_ids: set[int] = _get_hidden_recipe_ids(g.user["id"])
@@ -523,15 +662,8 @@ def api_nodes():
         # Фильтр: show_hidden=False (default) → скрытые не показываем
         if not show_hidden and row["deprecated"]:
             continue
-        if q:
-            haystack = " ".join(filter(None, [
-                row.get("machine_name") or "",
-                row.get("name")         or "",
-                " ".join(x["item"] for x in row["inputs"]),
-                " ".join(x["item"] for x in row["outputs"]),
-            ])).lower()
-            if q not in haystack:
-                continue
+        if search_ast and not _eval_search(search_ast, row):
+            continue
         result.append(row)
 
     total = len(result)

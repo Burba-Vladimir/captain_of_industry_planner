@@ -41,7 +41,7 @@
     <div class="flex-1 min-w-44 relative">
       <input type="search"
              x-model.debounce.250="q"
-             placeholder='Поиск по машине, предмету… ("текст" — точное совпадение)'
+             placeholder='Поиск: in:ресурс  out:ресурс  name:машина  &amp;  |  ()'
              :class="isExactSearch()
                ? 'border-violet-400 ring-2 ring-violet-200 font-mono'
                : 'border-slate-300 focus:ring-2 focus:ring-blue-400'"
@@ -146,8 +146,8 @@
                       :title="node.node_type==='recipe' ? 'рецепт' : 'комплекс'"
                       x-html="node.node_type==='recipe' ? _ICON_RECIPE : _ICON_COMPLEX"></span>
                 <span class="font-medium cursor-pointer hover:text-blue-600 transition-colors"
-                      @click.stop="searchExact(node.machine_name ?? node.name)"
-                      :title="'Найти: ' + (node.machine_name ?? node.name)"
+                      @click.stop="clickNodeName(node)"
+                      :title="node.node_type==='complex' ? 'Открыть редактор' : 'Найти: ' + (node.machine_name ?? node.name)"
                       x-text="node.machine_name ?? node.name"></span>
                 <span x-show="node.deprecated" class="chip bg-slate-100 text-slate-400">скрытый</span>
               </div>
@@ -490,6 +490,79 @@
 const _ICON_RECIPE  = '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.474l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115l.094-.319z"/></svg>';
 const _ICON_COMPLEX = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="2" r="1.5" fill="currentColor" stroke="none"/><circle cx="2" cy="13" r="1.5" fill="currentColor" stroke="none"/><circle cx="14" cy="13" r="1.5" fill="currentColor" stroke="none"/><line x1="7.1" y1="3.3" x2="3" y2="11.5"/><line x1="8.9" y1="3.3" x2="13" y2="11.5"/><line x1="3.5" y1="13" x2="12.5" y2="13"/></svg>';
 
+// ── Поиск с расширенным синтаксисом ─────────────────────────────
+// in:ресурс  out:ресурс  name:машина  &  |  ()
+// Без спецсимволов — legacy-поиск по всем полям.
+function _tokQ(q) {
+  const t = []; let i = 0;
+  while (i < q.length) {
+    const c = q[i];
+    if (' \t'.includes(c)) { i++; continue; }
+    if ('&|()'.includes(c)) { t.push(c); i++; continue; }
+    if (c === '"') {
+      const end = q.indexOf('"', i + 1);
+      if (end === -1) { t.push({k:'s', v:q.slice(i+1).toLowerCase()}); break; }
+      t.push({k:'s', v:q.slice(i+1, end).toLowerCase()}); i = end + 1; continue;
+    }
+    const pm = q.slice(i).match(/^(in|out|name):\s*(?:"([^"]*)"|(\S*))/i);
+    if (pm) { t.push({k:'p', p:pm[1].toLowerCase(), v:(pm[2]??pm[3]).toLowerCase()}); i += pm[0].length; continue; }
+    const wm = q.slice(i).match(/^[^ \t&|()"]+/);
+    if (wm) { t.push({k:'s', v:wm[0].toLowerCase()}); i += wm[0].length; } else i++;
+  }
+  return t;
+}
+function _parseQ(q) {
+  q = q.trim();
+  if (!q) return null;
+  if (!/(?:in|out|name):|[&|(]/i.test(q)) {
+    const exact = q[0]==='"'&&q.at(-1)==='"'&&q.length>2;
+    return {op:'legacy', exact, v: exact?q.slice(1,-1).toLowerCase():q.toLowerCase()};
+  }
+  const toks = _tokQ(q); let pos = 0;
+  const peek = () => pos < toks.length ? toks[pos] : null;
+  const next = () => toks[pos++];
+  function expr() {
+    let L = term();
+    while (peek()==='|') { next(); L={op:'or',L,R:term()}; }
+    return L;
+  }
+  function term() {
+    let L = factor();
+    while (peek()==='&') { next(); L={op:'and',L,R:factor()}; }
+    return L;
+  }
+  function factor() {
+    if (peek()==='(') { next(); const n=expr(); if(peek()===')') next(); return n; }
+    const t=next();
+    if (!t) return {op:'match',p:null,v:''};
+    if (t.k==='p') return {op:'match',p:t.p,v:t.v};
+    if (t.k==='s') return {op:'match',p:null,v:t.v};
+    return {op:'match',p:null,v:String(t).toLowerCase()};
+  }
+  return expr();
+}
+function _evalQ(ast, node) {
+  if (!ast) return true;
+  if (ast.op==='or')  return _evalQ(ast.L,node)||_evalQ(ast.R,node);
+  if (ast.op==='and') return _evalQ(ast.L,node)&&_evalQ(ast.R,node);
+  if (ast.op==='legacy') {
+    const h=[node.machine_name||'',node.name||'',...(node.inputs||[]).map(x=>x.item),...(node.outputs||[]).map(x=>x.item)].join(' ').toLowerCase();
+    return ast.exact ? h.split(' ').includes(ast.v)||h===ast.v : h.includes(ast.v);
+  }
+  if (ast.op==='match') {
+    const {p,v}=ast; if (!v) return true;
+    const ins=(node.inputs||[]).map(x=>x.item.toLowerCase());
+    const outs=(node.outputs||[]).map(x=>x.item.toLowerCase());
+    const nm=(node.machine_name||node.name||'').toLowerCase();
+    if (p==='in')   return ins.some(s=>s.includes(v));
+    if (p==='out')  return outs.some(s=>s.includes(v));
+    if (p==='name') return nm.includes(v);
+    return [nm,...ins,...outs].join(' ').includes(v);
+  }
+  return true;
+}
+// ────────────────────────────────────────────────────────────────
+
 function app() {
   return {
     nodes:         [],
@@ -520,6 +593,13 @@ function app() {
 
     // ── Helpers ────────────────────────────────────────────────
     searchExact(term) { this.q = '"' + term + '"'; },
+    clickNodeName(node) {
+      if (node.node_type === 'complex') {
+        window.location.href = '/complex/' + node.node_id + '/edit';
+      } else {
+        this.searchExact(node.machine_name ?? node.name);
+      }
+    },
     isExactSearch() {
       const q = this.q.trim();
       return q.length > 2 && q[0] === '"' && q[q.length - 1] === '"';
@@ -527,20 +607,12 @@ function app() {
 
     // ── Filtering ──────────────────────────────────────────────
     get filtered() {
-      const rawQ  = this.q.trim();
-      const exact = rawQ.startsWith('"') && rawQ.endsWith('"') && rawQ.length > 2;
-      const q     = exact ? rawQ.slice(1, -1).toLowerCase() : rawQ.toLowerCase();
+      const rawQ = this.q.trim();
+      const ast  = rawQ ? _parseQ(rawQ) : null;
       return this.nodes.filter(n => {
         if (this.type !== 'all' && n.node_type !== this.type) return false;
         if (!this.showHidden && n.deprecated === true)         return false;
-        if (!rawQ) return true;
-        const fields = [
-          n.machine_name ?? '', n.name ?? '',
-          ...(n.inputs  ?? []).map(x => x.item),
-          ...(n.outputs ?? []).map(x => x.item),
-        ];
-        if (exact) return fields.some(f => f.toLowerCase() === q);
-        return fields.join(' ').toLowerCase().includes(q);
+        return !ast || _evalQ(ast, n);
       });
     },
 

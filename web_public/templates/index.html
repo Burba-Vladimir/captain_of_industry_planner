@@ -242,7 +242,8 @@
                         :title="node.node_type==='recipe' ? 'recipe' : 'complex'"
                         x-html="node.node_type==='recipe' ? _ICON_RECIPE : _ICON_COMPLEX"></span>
                   <span class="font-medium cursor-pointer hover:text-blue-600 transition-colors dark:text-slate-200"
-                        @click.stop="searchExact(node.machine_name ?? node.name)"
+                        @click.stop="clickNodeName(node)"
+                        :title="node.node_type==='complex' ? '{{ t('browse.open_editor') }}' : '{{ t('browse.search_by') }}' + (node.machine_name ?? node.name)"
                         x-text="node.machine_name ?? node.name"></span>
                 </div>
               </td>
@@ -893,6 +894,13 @@ function app() {
       this.q = '"' + term + '"';
       this.page = 1;
       this.loadBrowse();
+    },
+    clickNodeName(node) {
+      if (node.node_type === 'complex') {
+        window.location.href = '/complex/' + node.slug + '/edit';
+      } else {
+        this.searchExact(node.machine_name ?? node.name);
+      }
     },
 
     get isExact() {
