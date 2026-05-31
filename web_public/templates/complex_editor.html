@@ -985,14 +985,18 @@ function complexEditor(complexId, readOnlyMode) {
       let target = this.nodes.find(n=>n.node_type===picked.node_type&&n.node_ref_id===picked.node_id);
       if (!target) {
         const ctxNode = this.nodes.find(n=>n._id===ctx.node_id);
-        const baseX   = ctxNode ? ctxNode.pos_x : 800;
-        const baseY   = ctxNode ? ctxNode.pos_y : 300;
+        const ctxPos  = ctxNode && this.nodePositions[ctxNode._id];
+        const baseX   = ctxPos ? ctxPos.x : (ctxNode ? ctxNode.pos_x : 800);
+        const baseY   = ctxPos ? ctxPos.y : (ctxNode ? ctxNode.pos_y : 300);
         const offsetX = ctx.direction==='produces' ? -(NODE_W+60) : (NODE_W+60);
         let idealX    = baseX + offsetX;
 
         if (idealX < 150) {
           const shift = 150 - idealX + 350;
           this.nodes = this.nodes.map(n=>({...n, pos_x: n.pos_x+shift}));
+          const shiftedPos={};
+          for (const [id,p] of Object.entries(this.nodePositions)) shiftedPos[id]={x:p.x+shift,y:p.y};
+          this.nodePositions=shiftedPos;
           idealX += shift;
           this.$nextTick(()=>{
             const s = document.getElementById('canvas-scroll');

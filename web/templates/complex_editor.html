@@ -846,15 +846,22 @@ function complexEditor(complexId) {
 
       if (!target) {
         const ctxNode = this.nodes.find(n => n._id === ctx.node_id);
-        const baseX   = ctxNode ? ctxNode.pos_x : 800;
-        const baseY   = ctxNode ? ctxNode.pos_y : 300;
+        // Читаем актуальную позицию из nodePositions (учитывает drag-перемещения)
+        const ctxPos  = ctxNode && this.nodePositions[ctxNode._id];
+        const baseX   = ctxPos ? ctxPos.x : (ctxNode ? ctxNode.pos_x : 800);
+        const baseY   = ctxPos ? ctxPos.y : (ctxNode ? ctxNode.pos_y : 300);
         const offsetX = ctx.direction === 'produces' ? -(NODE_W + 60) : (NODE_W + 60);
         let   idealX  = baseX + offsetX;
 
         // Если нет места слева — сдвигаем ВСЕ узлы вправо на 500px (резиновое пространство)
         if (idealX < 150) {
           const shift = 150 - idealX + 350;
+          // Обновляем и this.nodes (данные) и nodePositions (визуальные позиции)
           this.nodes = this.nodes.map(n => ({...n, pos_x: n.pos_x + shift}));
+          const shiftedPos = {};
+          for (const [id, p] of Object.entries(this.nodePositions))
+            shiftedPos[id] = {x: p.x + shift, y: p.y};
+          this.nodePositions = shiftedPos;
           idealX += shift;
           // Компенсируем прокрутку, чтобы вид не "прыгал"
           this.$nextTick(() => {
