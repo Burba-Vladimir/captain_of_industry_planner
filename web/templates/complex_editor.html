@@ -1407,17 +1407,16 @@ function complexEditor(complexId) {
         const tc  = ep.lcm_mode ? '#b45309' : '#64748b';
         const lbl = ep.resource_item.length > 9 ? ep.resource_item.slice(0,9)+'…' : ep.resource_item;
         const tip = (ep.lcm_mode ? 'НОК активен · ' : '') + esc(ep.resource_item) +
-                    ' · клик на метке: НОК';
-        return `<g>
+                    ' · клик: НОК';
+        return `<g data-eid="${ep._id}" data-act="lcm" style="cursor:pointer">
   <path d="${ep.path}" fill="none" stroke="transparent" stroke-width="16"/>
   <path d="${ep.path}" fill="none" stroke="${sc}" stroke-width="2" marker-end="${arr}"/>
-  <g transform="translate(${ep.midX},${ep.midY})" style="cursor:pointer"
-     data-eid="${ep._id}" data-act="lcm">
+  <title>${tip}</title>
+  <g transform="translate(${ep.midX},${ep.midY})">
     <rect x="-28" y="-11" width="56" height="22" rx="5"
           fill="${bg}" stroke="${bc}" stroke-width="1.5"/>
     <text text-anchor="middle" dominant-baseline="middle" font-size="9.5"
           fill="${tc}" font-family="ui-sans-serif,system-ui,sans-serif">${esc(lbl)}</text>
-    <title>${tip}</title>
   </g>
 </g>`;
       }).join('\n');
