@@ -546,8 +546,9 @@ function _evalQ(ast, node) {
   if (ast.op==='or')  return _evalQ(ast.L,node)||_evalQ(ast.R,node);
   if (ast.op==='and') return _evalQ(ast.L,node)&&_evalQ(ast.R,node);
   if (ast.op==='legacy') {
-    const h=[node.machine_name||'',node.name||'',...(node.inputs||[]).map(x=>x.item),...(node.outputs||[]).map(x=>x.item)].join(' ').toLowerCase();
-    return ast.exact ? h.split(' ').includes(ast.v)||h===ast.v : h.includes(ast.v);
+    const fields=[node.machine_name||'',node.name||'',...(node.inputs||[]).map(x=>x.item),...(node.outputs||[]).map(x=>x.item)];
+    if (ast.exact) return fields.some(f=>f.toLowerCase()===ast.v);
+    return fields.join(' ').toLowerCase().includes(ast.v);
   }
   if (ast.op==='match') {
     const {p,v}=ast; if (!v) return true;

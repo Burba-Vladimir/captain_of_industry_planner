@@ -128,14 +128,17 @@ def _eval_search(ast, row: dict) -> bool:
         return _eval_search(ast[1], row) and _eval_search(ast[2], row)
     if kind == 'legacy':
         _, exact, value = ast
+        if exact:
+            fields = [row.get('machine_name') or '', row.get('name') or ''] + \
+                     [x['item'] for x in (row.get('inputs') or [])] + \
+                     [x['item'] for x in (row.get('outputs') or [])]
+            return any(f.lower() == value for f in fields if f)
         haystack = ' '.join(filter(None, [
             row.get('machine_name') or '',
             row.get('name') or '',
             ' '.join(x['item'] for x in (row.get('inputs') or [])),
             ' '.join(x['item'] for x in (row.get('outputs') or [])),
         ])).lower()
-        if exact:
-            return value in haystack.split() or value == haystack
         return value in haystack
     if kind == 'match':
         _, prefix, value = ast
