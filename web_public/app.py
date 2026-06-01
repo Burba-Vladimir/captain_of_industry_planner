@@ -1407,6 +1407,63 @@ def api_complex_members(complex_id: int):
 
 
 # ─────────────────────────────────────────────────────────────────
+# CLI-команды (flask <cmd>)
+# ─────────────────────────────────────────────────────────────────
+
+import click
+
+@app.cli.command("cleanup-guests")
+@click.option("--months", default=6, show_default=True,
+              help="Удалить гостей без активности дольше N месяцев.")
+@click.option("--dry-run", is_flag=True,
+              help="Показать сколько будет удалено, но не удалять.")
+def cleanup_guests(months: int, dry_run: bool) -> None:
+    """Удаляет гостевые аккаунты без активности дольше заданного срока.
+
+    Пример запуска вручную:
+        flask cleanup-guests
+        flask cleanup-guests --months 3
+        flask cleanup-guests --dry-run
+
+    Пример cron (каждое воскресенье в 3:00):
+        0 3 * * 0  cd /app && flask cleanup-guests >> /var/log/coi_cleanup.log 2>&1
+    """
+    sql_count = """
+        SELECT COUNT(*) FROM users
+        WHERE  is_guest = TRUE
+          AND  last_seen_at < NOW() - (%s || ' months')::INTERVAL
+    """
+    sql_delete = """
+        DELETE FROM users
+        WHERE  is_guest = TRUE
+          AND  last_seen_at < NOW() - (%s || ' months')::INTERVAL
+        RETURNING id
+    """
+    with get_db() as con:
+        with con.cursor() as cur:
+            cur.execute(sql_count, (str(months),))
+            count = cur.fetchone()[0]
+
+        if dry_run:
+            click.echo(f"[dry-run] Будет удалено {count} гостевых аккаунтов "
+                       f"без активности >{months} мес.")
+            return
+
+        if count == 0:
+            click.echo(f"Нет гостей без активности >{months} мес. Ничего не удалено.")
+            return
+
+        with con.cursor() as cur:
+            cur.execute(sql_delete, (str(months),))
+            deleted_ids = [r[0] for r in cur.fetchall()]
+        con.commit()
+
+    click.echo(f"Удалено {len(deleted_ids)} гостевых аккаунтов "
+               f"(inactive >{months} мес.). IDs: {deleted_ids[:10]}"
+               f"{'...' if len(deleted_ids) > 10 else ''}")
+
+
+# ─────────────────────────────────────────────────────────────────
 # Запуск
 # ─────────────────────────────────────────────────────────────────
 
