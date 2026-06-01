@@ -79,7 +79,7 @@ def db_connect():
 
 
 def ensure_wiki_id_column(cur):
-    """Добавить wiki_id в recipes если ещё нет (идемпотентно)."""
+    """Добавить wiki_id в recipes если ещё нет + обновить индекс (идемпотентно)."""
     cur.execute("""
         SELECT column_name FROM information_schema.columns
         WHERE table_name = 'recipes' AND column_name = 'wiki_id'
@@ -87,7 +87,19 @@ def ensure_wiki_id_column(cur):
     if not cur.fetchone():
         print("  [migration] Добавляем колонку recipes.wiki_id ...")
         cur.execute("ALTER TABLE recipes ADD COLUMN wiki_id TEXT")
-        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_recipes_wiki_id ON recipes(wiki_id) WHERE wiki_id IS NOT NULL")
+
+    # Заменить старый одиночный индекс на составной (wiki_id, machine_id)
+    cur.execute("""
+        SELECT indexname FROM pg_indexes
+        WHERE tablename = 'recipes' AND indexname = 'uq_recipes_wiki_id'
+    """)
+    if cur.fetchone():
+        print("  [migration] Заменяем uq_recipes_wiki_id -> uq_recipes_wiki_machine ...")
+        cur.execute("DROP INDEX IF EXISTS uq_recipes_wiki_id")
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_recipes_wiki_machine
+        ON recipes(wiki_id, machine_id) WHERE wiki_id IS NOT NULL
+    """)
 
 
 def read_db_state(cur) -> tuple[dict, dict, dict, dict]:
@@ -95,7 +107,7 @@ def read_db_state(cur) -> tuple[dict, dict, dict, dict]:
     Возвращает (db_items, db_buildings, db_recipes, db_flows).
       db_items     : {name: id}
       db_buildings : {name: {id, workers, electricity_kw}}
-      db_recipes   : {wiki_id: {id, machine_name, cycle_time_s, machine_id}}
+      db_recipes   : {(wiki_id, machine_name): {id, machine_name, cycle_time_s, machine_id}}
       db_flows     : {recipe_id: [(item_name, direction, qty_cycle, qty_min, sort)]}
     """
     cur.execute("SELECT id, name FROM items")
@@ -107,9 +119,10 @@ def read_db_state(cur) -> tuple[dict, dict, dict, dict]:
         for r in cur.fetchall()
     }
 
+    # Ключ: (wiki_id, machine_name) — один wiki_id может быть у нескольких машин
     cur.execute("SELECT id, wiki_id, machine_name, cycle_time_s, machine_id FROM recipes WHERE wiki_id IS NOT NULL")
     db_recipes = {
-        r[1]: {
+        (r[1], r[2]): {
             "id":           r[0],
             "machine_name": r[2],
             "cycle_time_s": float(r[3]) if r[3] is not None else None,
@@ -216,7 +229,8 @@ def generate_sql(
         lines.append("")
 
     # ── 3. Recipes ────────────────────────────────────────────────────────
-    json_wiki_ids = {r["recipe_id"] for r in recipes_new if r.get("recipe_id")}
+    # Ключ в db_recipes: (wiki_id, machine_name)
+    json_keys = {(r["recipe_id"], r.get("machine", "")) for r in recipes_new if r.get("recipe_id")}
 
     new_recipes, upd_recipes = [], []
     for r in recipes_new:
@@ -225,24 +239,23 @@ def generate_sql(
             continue
         machine_name = r.get("machine", "")
         cycle = r.get("cycle_time_s")
+        key = (wiki_id, machine_name)
 
-        if wiki_id not in db_recipes:
+        if key not in db_recipes:
             new_recipes.append(r)
         else:
-            db_r = db_recipes[wiki_id]
+            db_r = db_recipes[key]
             changed = {}
             if cycle != db_r["cycle_time_s"]:
                 changed["cycle_time_s"] = cycle
-            if machine_name != db_r["machine_name"]:
-                changed["machine_name"] = machine_name
             if changed:
-                upd_recipes.append((wiki_id, db_r["id"], changed, r))
+                upd_recipes.append((wiki_id, machine_name, db_r["id"], changed, r))
 
     # Рецепты, которые есть в БД, но исчезли с Вики → deprecated
     dep_recipes = [
-        (wiki_id, info["id"])
-        for wiki_id, info in db_recipes.items()
-        if wiki_id not in json_wiki_ids
+        (key[0], info["id"])
+        for key, info in db_recipes.items()
+        if key not in json_keys
     ]
 
     if new_recipes:
@@ -257,7 +270,7 @@ def generate_sql(
                 f" VALUES ({_sql_val(wiki_id)}, {_sql_val(machine_name)},"
                 f" (SELECT id FROM buildings WHERE name = {_sql_val(machine_name)} LIMIT 1),"
                 f" {_sql_val(cycle)})"
-                f" ON CONFLICT (wiki_id) WHERE wiki_id IS NOT NULL DO NOTHING;"
+                f" ON CONFLICT (wiki_id, machine_id) WHERE wiki_id IS NOT NULL DO NOTHING;"
             )
             # Потоки ресурсов для нового рецепта
             flows = _recipe_flows_sql(wiki_id, r.get("inputs", []), r.get("outputs", []))
@@ -269,16 +282,16 @@ def generate_sql(
 
     if upd_recipes:
         lines.append(f"-- [{len(upd_recipes)} изменившихся рецептов]")
-        for wiki_id, db_id, changed, r in upd_recipes:
+        for wiki_id, machine_name, db_id, changed, r in upd_recipes:
             sets = ", ".join(f"{col} = {_sql_val(val)}" for col, val in changed.items())
-            lines.append(f"-- {wiki_id}: {changed}")
-            lines.append(f"UPDATE recipes SET {sets} WHERE wiki_id = {_sql_val(wiki_id)};")
+            lines.append(f"-- {wiki_id} ({machine_name}): {changed}")
+            lines.append(f"UPDATE recipes SET {sets} WHERE wiki_id = {_sql_val(wiki_id)} AND machine_name = {_sql_val(machine_name)};")
             # Пересчитать qty_per_min если изменился cycle_time_s
             if "cycle_time_s" in changed:
                 flows = _recipe_flows_sql(wiki_id, r.get("inputs", []), r.get("outputs", []))
                 if flows:
                     lines.append(f"DELETE FROM resource_flows WHERE parent_type = 0 AND recipe_id = {db_id};")
-                    lines.append(f"-- new flows for {wiki_id}")
+                    lines.append(f"-- new flows for {wiki_id} ({machine_name})")
                     lines += flows
                     stats["flows_upd"] += 1
             stats["recipes_upd"] += 1

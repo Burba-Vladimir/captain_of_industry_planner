@@ -28,18 +28,23 @@ ROOT = Path(__file__).parent
 
 # ── Ключ сопоставления ───────────────────────────────────────────
 
+def _norm_qty(q) -> float | None:
+    """Нормализует qty: float или None (null-qty сохраняем, не отфильтровываем)."""
+    return float(q) if q is not None else None
+
+
 def _fingerprint_json(r: dict) -> tuple:
-    """Fingerprint рецепта из recipes.json."""
-    ins  = frozenset((x["item"], x["qty_per_cycle"]) for x in r.get("inputs",  []))
-    outs = frozenset((x["item"], x["qty_per_cycle"]) for x in r.get("outputs", []))
+    """Fingerprint рецепта из recipes.json. null-qty сохраняется как None."""
+    ins  = frozenset((x["item"], _norm_qty(x["qty_per_cycle"])) for x in r.get("inputs",  []))
+    outs = frozenset((x["item"], _norm_qty(x["qty_per_cycle"])) for x in r.get("outputs", []))
     return (r["machine"], ins, outs)
 
 
 def _fingerprint_db(machine_name: str, flows: list) -> tuple:
-    """Fingerprint рецепта из БД (flows = список {d, item, qty})."""
-    valid = [f for f in flows if f.get("item") is not None and f.get("qty") is not None]
-    ins  = frozenset((f["item"], float(f["qty"])) for f in valid if f["d"] == 0)
-    outs = frozenset((f["item"], float(f["qty"])) for f in valid if f["d"] == 1)
+    """Fingerprint рецепта из БД. Фильтруем только None item (qty=None оставляем)."""
+    valid = [f for f in flows if f.get("item") is not None]
+    ins  = frozenset((f["item"], _norm_qty(f["qty"])) for f in valid if f["d"] == 0)
+    outs = frozenset((f["item"], _norm_qty(f["qty"])) for f in valid if f["d"] == 1)
     return (machine_name, ins, outs)
 
 
@@ -73,7 +78,7 @@ def load_json_recipes(path: Path) -> dict[tuple, str]:
 def load_db_recipes(cur) -> list[dict]:
     """Загружает рецепты с потоками из БД."""
     cur.execute("""
-        SELECT r.id, r.machine_name, r.cycle_time_s, r.wiki_id,
+        SELECT r.id, r.machine_name, r.cycle_time_s, r.wiki_id, r.machine_id,
                COALESCE(
                    json_agg(
                        json_build_object('d', rf.direction, 'item', i.name, 'qty', rf.qty_per_cycle)
@@ -102,6 +107,7 @@ def load_db_recipes(cur) -> list[dict]:
         result.append({
             "id":           row["id"],
             "machine_name": row["machine_name"],
+            "machine_id":   row["machine_id"],
             "cycle_time_s": float(row["cycle_time_s"]) if row["cycle_time_s"] else None,
             "wiki_id":      row["wiki_id"],
             "flows":        flows,
@@ -135,15 +141,17 @@ def run(dry_run: bool = False) -> None:
     unmatched   = []   # db рецепты без совпадения
     conflicted  = []   # wiki_id, на который претендуют >1 db записей
 
-    # Проверяем уникальность wiki_id → db_id (один wiki_id не должен уйти двум записям)
-    wiki_to_db: dict[str, list[int]] = {}
+    # Конфликт: один (wiki_id, machine_id) претендует на >1 DB-записей
+    # (wiki_id, machine_id уникальный ключ в БД — нарушение = конфликт)
+    wiki_machine_to_db: dict[tuple, list[int]] = {}
     for rec in db_recipes:
         fp = _fingerprint_db(rec["machine_name"], rec["flows"])
         wiki_id = json_map.get(fp)
         if wiki_id:
-            wiki_to_db.setdefault(wiki_id, []).append(rec["id"])
+            key = (wiki_id, rec["machine_id"])
+            wiki_machine_to_db.setdefault(key, []).append(rec["id"])
 
-    conflict_wiki_ids = {wid for wid, ids in wiki_to_db.items() if len(ids) > 1}
+    conflict_keys = {k for k, ids in wiki_machine_to_db.items() if len(ids) > 1}
 
     for rec in db_recipes:
         fp = _fingerprint_db(rec["machine_name"], rec["flows"])
@@ -153,7 +161,7 @@ def run(dry_run: bool = False) -> None:
             unmatched.append(rec)
             continue
 
-        if wiki_id in conflict_wiki_ids:
+        if (wiki_id, rec["machine_id"]) in conflict_keys:
             conflicted.append((rec["id"], wiki_id, rec["machine_name"]))
             continue
 

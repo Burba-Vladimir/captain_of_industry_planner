@@ -55,7 +55,9 @@ CREATE TABLE IF NOT EXISTS recipes (
     deprecated   BOOLEAN NOT NULL DEFAULT FALSE
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_recipes_wiki_id ON recipes(wiki_id) WHERE wiki_id IS NOT NULL;
+-- wiki_id уникален в рамках одной машины (разные машины могут иметь один wiki_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_recipes_wiki_machine
+    ON recipes(wiki_id, machine_id) WHERE wiki_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_recipes_machine_id   ON recipes (machine_id);
 CREATE INDEX IF NOT EXISTS idx_recipes_machine_name ON recipes (machine_name);
