@@ -1,0 +1,46 @@
+type	en_name	ru_name	notes
+building	Alloy Mixer	Смеситель расплавов
+building	Aluminum Cell	Криолитовый электролизёр
+building	Assembly IV	Сборочная линия IV
+building	Assembly V	Сборочная линия V
+building	Diamond Reactor	Синезатор алмазов
+building	Kiln	Печь
+building	Lens Polisher	Полировальный станок
+item	Alumina	Глинозём
+item	Aluminum	Алюминий
+item	Aluminum Scrap	Алюминиевый лом
+item	Aluminum Scrap Pressed	Алюминиевый лом в брикете
+item	Hydrated Alumina	Гидроксид алюминия
+item	Molten Aluminum	Расплав алюминия
+item	Red Mud	Красный шлам
+item	Bauxite	Боксит
+item	Bauxite Powder	Дробленый боксит
+item	Titanium Ore	Титановая руда
+item	Titanium Ore Crushed	Дроблёная титановая руда
+item	Titanium Alloy	Титановый сплав
+item	Titanium Chloride	Хлорид титана
+item	Titanium Chloride (Pure)	Сверхчистый хлорид титана
+item	Titanium Slag	Титановый шлак
+item	Titanium Sponge	Губчатый титан
+item	Molten Titanium	Расплав титана
+item	Molten Titanium Alloy	Расплав титанового сплава
+item	Chemical Fuel	Монопропеллент
+item	Compact Reactor	Микрореактор
+item	Uranium Ore Powder	Дробленая урановая руда
+item	Diamond	Алмаз
+item	Diamond Paste	Алмазная паста
+item	Lens	Линзы
+item	Sapphire Wafer	Сапфировая пластина
+item	Rail Parts	Рельсовые комплекты
+item	Station Parts	Компоненты станции
+item	Station Parts (Basic)	Базовые компоненты станции
+item	Asteroid Booster Parts	Компоненты астероидного ускорителя
+item	Space Probe Parts	Компоненты зонда
+item	Composite Core	Композитное ядро
+item	Composite Core Basic	Базовое композитное ядро
+item	Composite Panel	Композитная панель
+item	Crew Supplies	Запасы жизнеобеспечения
+item	Imported Goods	Импортные товары
+item	Luxury Goods	Предметы роскоши
+item	Office Supplies	Канцтовары
+item	Electronics IV	Электроника IV

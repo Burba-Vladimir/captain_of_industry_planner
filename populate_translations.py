@@ -92,6 +92,97 @@ def build_reverse_map(en: dict[str, str]) -> dict[str, str | None]:
 
 # ── Основная логика ──────────────────────────────────────────────
 
+# ── Ручные маппинги: DB name → po_key ───────────────────────────
+# Нужны когда DB-имя и EN msgstr структурно различаются:
+# CamelCase ("BlanketFuel" vs "Blanket fuel"), разные названия ("Assembly (Manual)" vs "Assembly I"), и т.д.
+
+MANUAL_ITEM_MAPPINGS: dict[str, str] = {
+    "BlanketFuel":          "Product_BlanketFuel__name",
+    "BlanketFuelEnriched":  "Product_BlanketFuelEnriched__name",
+    "CoreFuel":             "Product_CoreFuel__name",
+    "CoreFuelDirty":        "Product_CoreFuelDirty__name",
+    "SteamSp":              "Product_SteamSp__name",
+    "Electricity":          "Product_Virtual_Electricity__name",
+    "Consumer Electronics": "Product_ConsumerElectronics__name",
+    "Household Goods":      "Product_HouseholdGoods__name",
+    "Household Appliances": "Product_HouseholdAppliances__name",
+    # "Imported Goods" и "Uranium Ore Powder" — не найдены в .po, переводятся вручную
+}
+
+# ── Хардкод-переводы для имён, которых нет в .po ────────────────
+# Источник: translations_manual.tsv (проверено вручную)
+
+HARDCODED_TRANSLATIONS: dict[str, dict[str, str]] = {
+    # buildings
+    "Alloy Mixer":          {"ru": "Смеситель расплавов"},
+    "Aluminum Cell":        {"ru": "Криолитовый электролизёр"},
+    "Assembly IV":          {"ru": "Сборочная линия IV"},
+    "Assembly V":           {"ru": "Сборочная линия V"},
+    "Diamond Reactor":      {"ru": "Синезатор алмазов"},
+    "Kiln":                 {"ru": "Печь"},
+    "Lens Polisher":        {"ru": "Полировальный станок"},
+    # items — алюминий/бокситы
+    "Alumina":                      {"ru": "Глинозём"},
+    "Aluminum":                     {"ru": "Алюминий"},
+    "Aluminum Scrap":               {"ru": "Алюминиевый лом"},
+    "Aluminum Scrap Pressed":       {"ru": "Алюминиевый лом в брикете"},
+    "Hydrated Alumina":             {"ru": "Гидроксид алюминия"},
+    "Molten Aluminum":              {"ru": "Расплав алюминия"},
+    "Red Mud":                      {"ru": "Красный шлам"},
+    "Bauxite":                      {"ru": "Боксит"},
+    "Bauxite Powder":               {"ru": "Дробленый боксит"},
+    # items — титан
+    "Titanium Ore":                 {"ru": "Титановая руда"},
+    "Titanium Ore Crushed":         {"ru": "Дроблёная титановая руда"},
+    "Titanium Alloy":               {"ru": "Титановый сплав"},
+    "Titanium Chloride":            {"ru": "Хлорид титана"},
+    "Titanium Chloride (Pure)":     {"ru": "Сверхчистый хлорид титана"},
+    "Titanium Slag":                {"ru": "Титановый шлак"},
+    "Titanium Sponge":              {"ru": "Губчатый титан"},
+    "Molten Titanium":              {"ru": "Расплав титана"},
+    "Molten Titanium Alloy":        {"ru": "Расплав титанового сплава"},
+    # items — ядерные/спец.
+    "Chemical Fuel":                {"ru": "Монопропеллент"},
+    "Compact Reactor":              {"ru": "Микрореактор"},
+    "Uranium Ore Powder":           {"ru": "Дробленая урановая руда"},
+    # items — оптика
+    "Diamond":                      {"ru": "Алмаз"},
+    "Diamond Paste":                {"ru": "Алмазная паста"},
+    "Lens":                         {"ru": "Линзы"},
+    "Sapphire Wafer":               {"ru": "Сапфировая пластина"},
+    # items — поздняя игра/космос
+    "Rail Parts":                   {"ru": "Рельсовые комплекты"},
+    "Station Parts":                {"ru": "Компоненты станции"},
+    "Station Parts (Basic)":        {"ru": "Базовые компоненты станции"},
+    "Asteroid Booster Parts":       {"ru": "Компоненты астероидного ускорителя"},
+    "Space Probe Parts":            {"ru": "Компоненты зонда"},
+    # items — конструктивные
+    "Composite Core":               {"ru": "Композитное ядро"},
+    "Composite Core Basic":         {"ru": "Базовое композитное ядро"},
+    "Composite Panel":              {"ru": "Композитная панель"},
+    # items — товары/сервис
+    "Crew Supplies":                {"ru": "Запасы жизнеобеспечения"},
+    "Imported Goods":               {"ru": "Импортные товары"},
+    "Luxury Goods":                 {"ru": "Предметы роскоши"},
+    "Office Supplies":              {"ru": "Канцтовары"},
+    "Electronics IV":               {"ru": "Электроника IV"},
+}
+
+MANUAL_BUILDING_MAPPINGS: dict[str, str] = {
+    "Assembly (Manual)":    "AssemblyManual__name",
+    "Assembly (Electric)":  "AssemblyElectrified__name",
+    "Assembly (Electric) II": "AssemblyElectrifiedT2__name",
+    "Research Lab I":       "ResearchLab1__name",
+    "Research Lab II":      "ResearchLab2__name",
+    "Research Lab III":     "ResearchLab3__name",
+    "Research Lab IV":      "ResearchLab4__name",
+    "Research Lab V":       "ResearchLab5__name",
+    "Boiler (Coal)":        "BoilerCoal__name",
+    "Seawater Pump (L)":    "OceanWaterPumpLarge__name",
+    "Crystallizer":         "SiliconCrystallizer__name",
+}
+
+
 def run(dry_run: bool = False) -> None:
     po_en_path = PO_DIR / "en.po"
     po_ru_path = PO_DIR / "ru.po"
@@ -131,21 +222,35 @@ def run(dry_run: bool = False) -> None:
     ambig_bld:   list[str] = []
 
     def register(en_name: str, entity_id: int, is_building: bool) -> None:
-        po_key = rev.get(en_name.lower())
+        manual = MANUAL_BUILDING_MAPPINGS if is_building else MANUAL_ITEM_MAPPINGS
         updates = building_updates if is_building else item_updates
         stat_pfx = "bld" if is_building else "items"
         miss_list = miss_bld if is_building else miss_items
         ambig_list = ambig_bld if is_building else ambig_items
 
-        if po_key is None and en_name.lower() in rev:
-            # Присутствует в map, но неоднозначно
-            ambig_list.append(en_name)
-            stats[f"{stat_pfx}_ambig"] += 1
-            return
+        # Сначала проверяем ручной маппинг
+        po_key = manual.get(en_name)
         if not po_key:
-            miss_list.append(en_name)
-            stats[f"{stat_pfx}_miss"] += 1
-            return
+            # Авто-поиск через reverse-map
+            po_key = rev.get(en_name.lower())
+
+            if po_key is None and en_name.lower() in rev:
+                ambig_list.append(en_name)
+                stats[f"{stat_pfx}_ambig"] += 1
+                return
+            if not po_key:
+                if en_name in HARDCODED_TRANSLATIONS:
+                    # Синтетический ключ для записей без .po
+                    po_key = f"__hardcoded__{en_name}"
+                    updates.append((po_key, entity_id))
+                    stats[f"{stat_pfx}_ok"] += 1
+                    translations[(po_key, "en")] = en_name
+                    for lang, val in HARDCODED_TRANSLATIONS[en_name].items():
+                        translations[(po_key, lang)] = val
+                    return
+                miss_list.append(en_name)
+                stats[f"{stat_pfx}_miss"] += 1
+                return
 
         updates.append((po_key, entity_id))
         stats[f"{stat_pfx}_ok"] += 1
