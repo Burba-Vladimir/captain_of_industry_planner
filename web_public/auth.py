@@ -7,10 +7,14 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import random
+import smtplib
 import string
 import uuid
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from functools import wraps
 
 import requests
@@ -19,6 +23,8 @@ from flask import (Blueprint, abort, g, jsonify, redirect,
                    request, session, url_for)
 
 from db import get_db
+
+log = logging.getLogger(__name__)
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 oauth    = OAuth()
@@ -296,6 +302,183 @@ def login_with_code():
     if not row:
         return jsonify({"error": "Code not found"}), 404
     session["user_id"] = row[0]
+    return jsonify({"ok": True})
+
+
+# ─────────────────────────────────────────────────────────────────
+# Email-авторизация (одноразовый 6-значный код)
+# ─────────────────────────────────────────────────────────────────
+
+def _gen_email_code() -> str:
+    """Генерирует 6-значный цифровой код."""
+    return f"{random.randint(0, 999999):06d}"
+
+
+def _send_email(to: str, code: str) -> None:
+    """
+    Отправляет письмо с кодом.
+    Если SMTP не настроен — выводит код в лог (для разработки).
+    """
+    smtp_host = os.environ.get("SMTP_HOST")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_user = os.environ.get("SMTP_USER", "")
+    smtp_pass = os.environ.get("SMTP_PASS", "")
+    smtp_from = os.environ.get("SMTP_FROM", smtp_user or "noreply@coi-planner.app")
+
+    subject = "Your CoI Planner login code"
+    body_text = f"Your login code: {code}\n\nThis code expires in 15 minutes."
+    body_html = f"""
+<div style="font-family:sans-serif;max-width:420px">
+  <h2 style="color:#1e40af">Captain of Industry Planner</h2>
+  <p>Your login code:</p>
+  <div style="font-size:2rem;font-weight:bold;letter-spacing:.3em;color:#1d4ed8;
+              background:#eff6ff;border-radius:8px;padding:16px 24px;display:inline-block">
+    {code}
+  </div>
+  <p style="color:#64748b;font-size:.85rem">Expires in 15 minutes. Do not share this code.</p>
+</div>"""
+
+    if not smtp_host:
+        # Dev-режим: просто логируем
+        log.warning("SMTP not configured — email code for %s: %s", to, code)
+        print(f"\n{'='*40}\nEmail code for {to}: {code}\n{'='*40}\n")
+        return
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = smtp_from
+    msg["To"]      = to
+    msg.attach(MIMEText(body_text, "plain"))
+    msg.attach(MIMEText(body_html, "html"))
+
+    with smtplib.SMTP(smtp_host, smtp_port) as srv:
+        srv.ehlo()
+        if smtp_port != 465:
+            srv.starttls()
+        if smtp_user and smtp_pass:
+            srv.login(smtp_user, smtp_pass)
+        srv.sendmail(smtp_from, [to], msg.as_string())
+
+
+def _merge_guest_to_user(guest_id: int, real_id: int) -> None:
+    """
+    Переносит данные гостя (комплексы, скрытые рецепты) на реальный аккаунт.
+    Гостевой пользователь удаляется после переноса.
+    """
+    if guest_id == real_id:
+        return
+    with get_db() as con:
+        with con.cursor() as cur:
+            # Перенести комплексы (где нет конфликта имён с существующими у real_id)
+            cur.execute("""
+                UPDATE complexes SET user_id = %s
+                WHERE  user_id = %s
+                  AND  name NOT IN (
+                      SELECT name FROM complexes WHERE user_id = %s
+                  )
+            """, (real_id, guest_id, real_id))
+            # Скопировать скрытые рецепты (игнорировать дубликаты)
+            cur.execute("""
+                INSERT INTO user_recipe_prefs (user_id, recipe_id, hidden)
+                SELECT %s, recipe_id, hidden
+                FROM   user_recipe_prefs
+                WHERE  user_id = %s AND hidden = TRUE
+                ON CONFLICT (user_id, recipe_id) DO NOTHING
+            """, (real_id, guest_id))
+            # Удалить гостя (каскад удалит оставшиеся данные)
+            cur.execute("DELETE FROM users WHERE id = %s AND is_guest = TRUE", (guest_id,))
+        con.commit()
+    log.info("Merged guest %d into user %d", guest_id, real_id)
+
+
+@auth_bp.route("/email/send", methods=["POST"])
+def email_send():
+    """
+    Шаг 1: получить email, сгенерировать код, отправить письмо.
+    Rate-limit: не более 3 кодов на один email за последние 10 минут.
+    """
+    data  = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+
+    # Базовая валидация
+    if not email or "@" not in email or len(email) > 254:
+        return jsonify({"error": "invalid_email"}), 400
+
+    # Rate-limit
+    with get_db() as con:
+        with con.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM email_codes
+                WHERE  email = %s AND created_at > NOW() - INTERVAL '10 minutes'
+            """, (email,))
+            if cur.fetchone()[0] >= 3:
+                return jsonify({"error": "too_many_requests"}), 429
+
+    code = _gen_email_code()
+
+    with get_db() as con:
+        with con.cursor() as cur:
+            cur.execute(
+                "INSERT INTO email_codes (email, code) VALUES (%s, %s)",
+                (email, code),
+            )
+        con.commit()
+
+    try:
+        _send_email(email, code)
+    except Exception as e:
+        log.exception("Failed to send email to %s", email)
+        return jsonify({"error": "send_failed", "detail": str(e)}), 500
+
+    return jsonify({"ok": True})
+
+
+@auth_bp.route("/email/verify", methods=["POST"])
+def email_verify():
+    """
+    Шаг 2: проверить код, войти / создать аккаунт, смержить гостя.
+    """
+    data  = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    code  = (data.get("code")  or "").strip()
+
+    if not email or not code or len(code) != 6:
+        return jsonify({"error": "invalid_input"}), 400
+
+    with get_db() as con:
+        with con.cursor() as cur:
+            cur.execute("""
+                UPDATE email_codes
+                SET    used_at = NOW()
+                WHERE  email = %s AND code = %s
+                  AND  used_at IS NULL
+                  AND  expires_at > NOW()
+                RETURNING id
+            """, (email, code))
+            row = cur.fetchone()
+        con.commit()
+
+    if not row:
+        return jsonify({"error": "invalid_or_expired_code"}), 400
+
+    # Имя по умолчанию — часть email до @
+    display_name = email.split("@")[0]
+    user_id = _upsert_user(
+        provider="email",
+        provider_user_id=email,
+        display_name=display_name,
+        avatar_url=None,
+        email=email,
+    )
+
+    # Merge гостя если был
+    guest_user = g.get("user")
+    if guest_user and guest_user.get("is_guest"):
+        _merge_guest_to_user(guest_user["id"], user_id)
+        # Сбросить гостевой cookie
+        session.pop("_seen_updated", None)
+
+    session["user_id"] = user_id
     return jsonify({"ok": True})
 
 

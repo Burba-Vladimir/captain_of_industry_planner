@@ -296,10 +296,10 @@ CREATE INDEX IF NOT EXISTS idx_contract_items_contract ON contract_items (contra
 
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'auth_provider') THEN
-        CREATE TYPE auth_provider AS ENUM ('google', 'steam', 'session_code', 'guest');
+        CREATE TYPE auth_provider AS ENUM ('google', 'steam', 'session_code', 'guest', 'email');
     ELSE
-        -- Добавляем значения если их нет (для идемпотентности)
         BEGIN ALTER TYPE auth_provider ADD VALUE IF NOT EXISTS 'guest'; EXCEPTION WHEN others THEN END;
+        BEGIN ALTER TYPE auth_provider ADD VALUE IF NOT EXISTS 'email'; EXCEPTION WHEN others THEN END;
     END IF;
 END $$;
 
@@ -328,6 +328,17 @@ CREATE TABLE IF NOT EXISTS session_codes (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_used_at TIMESTAMPTZ
 );
+
+-- Одноразовые коды для email-авторизации (TTL 15 минут)
+CREATE TABLE IF NOT EXISTS email_codes (
+    id         SERIAL      PRIMARY KEY,
+    email      TEXT        NOT NULL,
+    code       CHAR(6)     NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '15 minutes',
+    used_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_email_codes_email ON email_codes(email);
 
 CREATE TABLE IF NOT EXISTS user_settings (
     user_id INT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,

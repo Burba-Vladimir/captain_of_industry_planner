@@ -17,7 +17,21 @@
     "session_code_new": "Generate new code (saves your settings)",
     "session_code_copy": "Copy code",
     "session_code_hint": "Save this code — it's your key to restore settings on any device.",
-    "not_logged_in": "Sign in to save complexes and settings across devices."
+    "not_logged_in": "Sign in to save complexes and settings across devices.",
+    "email_label": "Sign in with Email",
+    "email_placeholder": "your@email.com",
+    "email_send_btn": "Send code",
+    "email_sending": "Sending…",
+    "email_code_label": "Enter the 6-digit code from your email",
+    "email_code_placeholder": "123456",
+    "email_verify_btn": "Sign In",
+    "email_verifying": "Verifying…",
+    "email_resend": "Send a new code",
+    "email_sent_hint": "Check your inbox (and spam). The code is valid for 15 minutes.",
+    "email_error_invalid": "Incorrect or expired code. Please try again.",
+    "email_error_too_many": "Too many attempts. Please wait a few minutes.",
+    "email_error_send_failed": "Failed to send email. Please try again.",
+    "email_guest_merge": "Your saved data will be linked to this account."
   },
   "complex": {
     "new": "New Complex",

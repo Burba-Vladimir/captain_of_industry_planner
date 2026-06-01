@@ -146,7 +146,7 @@
     </div>
     {% else %}
     {# Гость или нет пользователя #}
-    <button @click="showAuth=true"
+    <button @click="openAuth()"
             class="shrink-0 px-3 py-1.5 border border-slate-300 dark:border-slate-600
                    text-sm font-medium rounded-lg text-slate-600 dark:text-slate-300
                    hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
@@ -713,8 +713,8 @@
      x-transition:enter-end="opacity-100"
      class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
   <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6 max-w-sm w-full relative"
-       @click.outside="showAuth=false">
-    <button @click="showAuth=false" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 text-lg">✕</button>
+       @click.outside="showAuth=false; emailStep='email'; emailCode=''; emailError=''">
+    <button @click="showAuth=false; emailStep='email'; emailCode=''; emailError=''" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 text-lg">✕</button>
     <h2 class="font-bold text-xl text-slate-800 dark:text-slate-100 mb-1">{{ t('nav.login') }}</h2>
     <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">{{ t('auth.not_logged_in') }}</p>
 
@@ -743,40 +743,56 @@
         {{ t('auth.sign_in_with_steam') }}
       </a>
 
-      <!-- Session code -->
+      <!-- Email auth -->
       <div class="border border-slate-200 dark:border-slate-600 rounded-xl p-4">
-        <p class="text-sm font-medium text-slate-700 dark:text-slate-200 mb-3">{{ t('auth.sign_in_with_code') }}</p>
-        <input type="text" x-model="sessionCode"
-               placeholder="{{ t('auth.session_code_placeholder') }}"
-               maxlength="8"
-               @keyup.enter="loginWithCode()"
-               class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600
-                      rounded-lg text-sm mb-2 uppercase tracking-widest font-mono
-                      bg-white dark:bg-slate-700 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400">
-        <button @click="loginWithCode()"
-                :disabled="sessionCode.length < 6"
-                class="w-full px-4 py-2 bg-blue-600 text-white text-sm rounded-lg
-                       hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-          {{ t('nav.login') }} with code
-        </button>
-        <div class="border-t border-slate-100 dark:border-slate-700 mt-3 pt-3">
-          <button @click="createNewCode()"
-                  class="w-full px-4 py-2 border border-slate-200 dark:border-slate-600 text-sm rounded-lg
-                         text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-            {{ t('auth.session_code_new') }}
+        <p class="text-sm font-medium text-slate-700 dark:text-slate-200 mb-3">{{ t('auth.email_label') }}</p>
+
+        <!-- Шаг 1: ввод email -->
+        <div x-show="emailStep === 'email'">
+          <p x-show="window._coiUser?.is_guest"
+             class="text-xs text-blue-600 dark:text-blue-400 mb-2">{{ t('auth.email_guest_merge') }}</p>
+          <input type="email" x-model="emailInput" x-ref="emailField"
+                 placeholder="{{ t('auth.email_placeholder') }}"
+                 @keyup.enter="sendEmailCode()"
+                 class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-lg
+                        text-sm mb-2 bg-white dark:bg-slate-700 dark:text-slate-100
+                        focus:outline-none focus:ring-2 focus:ring-blue-400">
+          <p x-show="emailError" x-text="emailError"
+             class="text-xs text-red-600 dark:text-red-400 mb-2"></p>
+          <button @click="sendEmailCode()"
+                  :disabled="emailLoading || !emailInput.includes('@')"
+                  class="w-full px-4 py-2 bg-blue-600 text-white text-sm rounded-lg
+                         hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            <span x-show="!emailLoading">{{ t('auth.email_send_btn') }}</span>
+            <span x-show="emailLoading">{{ t('auth.email_sending') }}</span>
           </button>
         </div>
-      </div>
 
-      <!-- New code result -->
-      <div x-show="newCodeValue" class="bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4">
-        <p class="text-xs text-emerald-700 dark:text-emerald-300 mb-2">{{ t('auth.session_code_hint') }}</p>
-        <div class="flex items-center gap-2">
-          <code class="flex-1 font-mono font-bold text-lg text-emerald-800 dark:text-emerald-200 tracking-widest"
-                x-text="newCodeValue"></code>
-          <button @click="copyCode()"
-                  class="text-xs px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
-            {{ t('auth.session_code_copy') }}
+        <!-- Шаг 2: ввод кода -->
+        <div x-show="emailStep === 'code'">
+          <p class="text-xs text-slate-500 dark:text-slate-400 mb-1">{{ t('auth.email_sent_hint') }}</p>
+          <p class="text-xs font-medium text-slate-600 dark:text-slate-300 mb-2" x-text="emailInput"></p>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mb-2">{{ t('auth.email_code_label') }}</p>
+          <input type="text" x-model="emailCode" x-ref="codeField"
+                 placeholder="{{ t('auth.email_code_placeholder') }}"
+                 maxlength="6" inputmode="numeric"
+                 @keyup.enter="verifyEmailCode()"
+                 class="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-lg
+                        text-sm mb-2 font-mono tracking-widest text-center text-lg
+                        bg-white dark:bg-slate-700 dark:text-slate-100
+                        focus:outline-none focus:ring-2 focus:ring-blue-400">
+          <p x-show="emailError" x-text="emailError"
+             class="text-xs text-red-600 dark:text-red-400 mb-2"></p>
+          <button @click="verifyEmailCode()"
+                  :disabled="emailLoading || emailCode.length !== 6"
+                  class="w-full px-4 py-2 bg-blue-600 text-white text-sm rounded-lg
+                         hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors mb-2">
+            <span x-show="!emailLoading">{{ t('auth.email_verify_btn') }}</span>
+            <span x-show="emailLoading">{{ t('auth.email_verifying') }}</span>
+          </button>
+          <button @click="emailStep='email'; emailCode=''; emailError=''"
+                  class="w-full text-xs text-slate-500 dark:text-slate-400 hover:text-blue-600 py-1">
+            {{ t('auth.email_resend') }}
           </button>
         </div>
       </div>
@@ -832,14 +848,17 @@ function app() {
 
     /* ── Auth modal ──────────────────────────────────────────────── */
     showAuth:    false,
-    sessionCode: '',
-    newCodeValue: null,
+    emailStep:   'email',   // 'email' | 'code'
+    emailInput:  '',
+    emailCode:   '',
+    emailError:  '',
+    emailLoading: false,
 
     /* ── Init ──────────────────────────────────────────────────────── */
     async init() {
       // Автоматически открыть модал авторизации если пришли с ?login=1
       if (new URLSearchParams(window.location.search).has('login')) {
-        this.showAuth = true;
+        this.openAuth();
         window.history.replaceState({}, '', window.location.pathname);
       }
       await this.loadBrowse();
@@ -1013,7 +1032,7 @@ function app() {
           method: 'PATCH', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({hidden: newVal}),
         });
-        if (!r.ok) { const d=await r.json(); if(d.error==='login_required'){this.showAuth=true;return;} throw new Error(d.error||'error'); }
+        if (!r.ok) { const d=await r.json(); if(d.error==='login_required'){this.openAuth();return;} throw new Error(d.error||'error'); }
         const idx = this.nodes.findIndex(n=>n.node_type===node.node_type&&n.node_id===node.node_id);
         if (idx!==-1) { this.nodes[idx]={...this.nodes[idx],deprecated:newVal}; this.nodes=[...this.nodes]; }
       } catch(e) { alert('Error: '+e.message); }
@@ -1070,7 +1089,7 @@ function app() {
       const method = c._liked ? 'DELETE' : 'POST';
       try {
         const r = await fetch(`/api/complex/${c.id}/like`, {method});
-        if (!r.ok) { const d=await r.json(); if(d.error==='login_required'){this.showAuth=true;return;} }
+        if (!r.ok) { const d=await r.json(); if(d.error==='login_required'){this.openAuth();return;} }
         c._liked = !c._liked;
         c.likes_count = (c.likes_count||0) + (c._liked ? 1 : -1);
         this.communityItems = [...this.communityItems];
@@ -1114,35 +1133,66 @@ function app() {
       } catch(e) { alert('Error: '+e.message); }
     },
 
-    /* ── Auth ───────────────────────────────────────────────────── */
-    async loginWithCode() {
-      const code = (this.sessionCode||'').trim().toUpperCase();
-      if (code.length < 6) return;
+    /* ── Auth modal helpers ─────────────────────────────────────── */
+    openAuth() {
+      this.emailStep = 'email'; this.emailInput = '';
+      this.emailCode = ''; this.emailError = ''; this.emailLoading = false;
+      this.showAuth = true;
+    },
+
+    /* ── Email auth ─────────────────────────────────────────────── */
+    async sendEmailCode() {
+      const email = (this.emailInput||'').trim().toLowerCase();
+      if (!email.includes('@')) return;
+      this.emailLoading = true;
+      this.emailError   = '';
       try {
-        const r = await fetch('/auth/code/login', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({code}),
+        const r = await fetch('/auth/email/send', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({email}),
         });
-        if (r.ok) { window.location.reload(); }
-        else { const d=await r.json(); alert(d.error||'Code not found'); }
-      } catch(e) { alert('Error: '+e.message); }
-    },
-
-    async createNewCode() {
-      try {
-        const r = await fetch('/auth/code/new', {method:'POST'});
+        const d = await r.json();
         if (r.ok) {
-          const d = await r.json();
-          this.newCodeValue = d.code;
+          this.emailStep = 'code';
+          this.$nextTick(() => this.$refs.codeField?.focus());
+        } else {
+          const errMap = {
+            too_many_requests: jt('auth.email_error_too_many'),
+            send_failed:       jt('auth.email_error_send_failed'),
+          };
+          this.emailError = errMap[d.error] || d.error || 'Error';
         }
-      } catch(e) { alert('Error: '+e.message); }
+      } catch(e) {
+        this.emailError = jt('auth.email_error_send_failed');
+      } finally {
+        this.emailLoading = false;
+      }
     },
 
-    copyCode() {
-      if (this.newCodeValue) {
-        navigator.clipboard.writeText(this.newCodeValue).then(()=>{
-          // Short visual feedback
-        }).catch(()=> alert(this.newCodeValue));
+    async verifyEmailCode() {
+      const email = (this.emailInput||'').trim().toLowerCase();
+      const code  = (this.emailCode||'').trim();
+      if (code.length !== 6) return;
+      this.emailLoading = true;
+      this.emailError   = '';
+      try {
+        const r = await fetch('/auth/email/verify', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({email, code}),
+        });
+        if (r.ok) {
+          window.location.reload();
+        } else {
+          this.emailError = jt('auth.email_error_invalid');
+          this.emailCode  = '';
+          this.$nextTick(() => this.$refs.codeField?.focus());
+        }
+      } catch(e) {
+        this.emailError = jt('auth.email_error_invalid');
+      } finally {
+        this.emailLoading = false;
       }
     },
 
