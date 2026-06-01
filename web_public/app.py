@@ -213,6 +213,8 @@ def before_request():
     if not lang and not g.user.get("is_guest"):
         lang = _get_user_setting(g.user["id"], "ui_language")
     g.lang = lang or "en"
+    # Загружаем переводы игрового контента для текущего языка (один запрос на request)
+    g.content_trans = _load_content_translations(g.lang)
     # Тема управляется через localStorage на клиенте
     g.theme = "light"
 
@@ -537,6 +539,31 @@ ORDER BY COALESCE(machine_name, name)
 """
 
 
+def _load_content_translations(lang: str) -> dict[str, str]:
+    """Возвращает {english_name: localized_name} для items и buildings.
+    Для lang='en' возвращает пустой dict (нет необходимости в переводе).
+    """
+    if lang == "en":
+        return {}
+    try:
+        with get_db() as con:
+            with con.cursor() as cur:
+                cur.execute("""
+                    SELECT i.name, ct.value
+                    FROM items i
+                    JOIN content_translations ct ON ct.po_key = i.po_key AND ct.lang = %s
+                    WHERE i.po_key IS NOT NULL
+                    UNION ALL
+                    SELECT b.name, ct.value
+                    FROM buildings b
+                    JOIN content_translations ct ON ct.po_key = b.po_key AND ct.lang = %s
+                    WHERE b.po_key IS NOT NULL
+                """, (lang, lang))
+                return dict(cur.fetchall())
+    except Exception:
+        return {}
+
+
 def _parse_row(row: dict) -> dict:
     row = dict(row)
     # Convert UUID to string for JSON serialisation
@@ -558,6 +585,17 @@ def _parse_row(row: dict) -> dict:
         if row[f] is not None:
             row[f] = float(row[f])
     row["deprecated"] = bool(row.get("deprecated"))
+
+    # Применяем переводы игрового контента (machine_name + item names)
+    trans = getattr(g, "content_trans", {})
+    if trans:
+        if row.get("machine_name"):
+            row["machine_name"] = trans.get(row["machine_name"], row["machine_name"])
+        for f in ("inputs", "outputs", "maintenance"):
+            for entry in row[f]:
+                if "item" in entry:
+                    entry["item"] = trans.get(entry["item"], entry["item"])
+
     return row
 
 

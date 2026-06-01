@@ -9,19 +9,29 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS items (
-    id   SERIAL       PRIMARY KEY,
-    name VARCHAR(200) NOT NULL,
+    id     SERIAL       PRIMARY KEY,
+    name   VARCHAR(200) NOT NULL,
+    po_key TEXT,                         -- msgid из .po файла игры (для локализации)
     CONSTRAINT uq_items_name UNIQUE (name)
 );
 
 CREATE TABLE IF NOT EXISTS buildings (
     id             SERIAL       PRIMARY KEY,
     name           VARCHAR(200) NOT NULL,
+    po_key         TEXT,                 -- msgid из .po файла игры (для локализации)
     workers        SMALLINT     CHECK (workers >= 0),
     electricity_kw NUMERIC(10, 2),
     footprint      VARCHAR(20),
     designation    VARCHAR(100),
     CONSTRAINT uq_buildings_name UNIQUE (name)
+);
+
+-- Переводы игрового контента из .po файлов игры
+CREATE TABLE IF NOT EXISTS content_translations (
+    po_key TEXT NOT NULL,
+    lang   TEXT NOT NULL,
+    value  TEXT NOT NULL,
+    PRIMARY KEY (po_key, lang)
 );
 
 CREATE INDEX IF NOT EXISTS idx_buildings_designation ON buildings (designation);
