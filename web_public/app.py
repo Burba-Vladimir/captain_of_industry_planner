@@ -176,9 +176,23 @@ app.secret_key = os.environ["SECRET_KEY"]
 init_oauth(app)
 app.register_blueprint(auth_bp)
 
-# Лимиты free-tier
-FREE_MAX_PRIVATE  = int(os.environ.get("FREE_MAX_PRIVATE_COMPLEXES", "10"))
-FREE_MAX_PUBLIC   = int(os.environ.get("FREE_MAX_PUBLIC_COMPLEXES",  "3"))
+# ── Rate limiting (Flask-Limiter) ──────────────────────────────
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=["200 per minute"],
+    storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
+)
+# Лимиты на auth-роуты (blueprint зарегистрирован выше)
+limiter.limit("5 per hour")(app.view_functions["auth.email_send"])
+limiter.limit("10 per hour")(app.view_functions["auth.email_verify"])
+limiter.limit("10 per hour")(app.view_functions["auth.login_with_code"])
+
+# ── Лимит комплексов на пользователя ──────────────────────────
+MAX_COMPLEXES = int(os.environ.get("MAX_COMPLEXES_PER_USER", "30"))
 
 # Гостевые сессии
 GUEST_COOKIE      = "coi_guest"
@@ -937,22 +951,6 @@ def api_complex_visibility(complex_id: int):
     if visibility == "public" and g.user.get("is_guest"):
         return jsonify({"error": "login_required", "reason": "publish"}), 401
 
-    # Проверить лимит публикаций для free-tier
-    if visibility == "public" and not g.user["is_premium"]:
-        with get_db() as con:
-            with con.cursor() as cur:
-                cur.execute(
-                    "SELECT COUNT(*) FROM complexes WHERE user_id = %s AND visibility = 'public'",
-                    (g.user["id"],),
-                )
-                count = cur.fetchone()[0]
-        if count >= FREE_MAX_PUBLIC:
-            return jsonify({
-                "error":    "limit_reached",
-                "limit":    FREE_MAX_PUBLIC,
-                "message":  f"Free plan allows up to {FREE_MAX_PUBLIC} public complexes.",
-            }), 403
-
     with get_db() as con:
         with con.cursor() as cur:
             cur.execute(
@@ -966,13 +964,14 @@ def api_complex_visibility(complex_id: int):
 
 
 @app.route("/api/complex/<int:complex_id>/fork", methods=["POST"])
+@limiter.limit("10 per hour")
 def api_complex_fork(complex_id: int):
     """Скопировать публичный комплекс в аккаунт пользователя."""
     if g.user.get("is_guest"):
         return jsonify({"error": "login_required", "reason": "fork"}), 401
 
-    # Проверить лимит личных комплексов
-    if not g.user["is_premium"]:
+    # Проверить суммарный лимит комплексов
+    if not g.user.get("is_premium"):
         with get_db() as con:
             with con.cursor() as cur:
                 cur.execute(
@@ -980,11 +979,11 @@ def api_complex_fork(complex_id: int):
                     (g.user["id"],),
                 )
                 count = cur.fetchone()[0]
-        if count >= FREE_MAX_PRIVATE:
+        if count >= MAX_COMPLEXES:
             return jsonify({
                 "error":   "limit_reached",
-                "limit":   FREE_MAX_PRIVATE,
-                "message": f"Free plan allows up to {FREE_MAX_PRIVATE} complexes.",
+                "limit":   MAX_COMPLEXES,
+                "message": f"Maximum {MAX_COMPLEXES} complexes per account. Delete old ones to create new.",
             }), 403
 
     with get_db() as con:
@@ -1029,6 +1028,7 @@ def api_complex_fork(complex_id: int):
 
 
 @app.route("/api/complex/<int:complex_id>/like", methods=["POST", "DELETE"])
+@limiter.limit("60 per hour")
 def api_complex_like(complex_id: int):
     """Поставить / убрать лайк."""
     if not g.get("user"):
@@ -1337,10 +1337,11 @@ def _save_complex_graph(con, complex_id, data, user_id: int | None):
 
 
 @app.route("/api/complex", methods=["POST"])
+@limiter.limit("30 per hour")   # rate: не более 30 новых комплексов в час с одного IP
 def api_complex_create():
     # Гости тоже могут создавать комплексы (g.user всегда установлен)
-    # Проверить лимит
-    if not g.user["is_premium"]:
+    # Проверить суммарный лимит (premium пользователи без ограничений)
+    if not g.user.get("is_premium"):
         with get_db() as con:
             with con.cursor() as cur:
                 cur.execute(
@@ -1348,11 +1349,11 @@ def api_complex_create():
                     (g.user["id"],),
                 )
                 count = cur.fetchone()[0]
-        if count >= FREE_MAX_PRIVATE:
+        if count >= MAX_COMPLEXES:
             return jsonify({
                 "error":   "limit_reached",
-                "limit":   FREE_MAX_PRIVATE,
-                "message": f"Free plan allows up to {FREE_MAX_PRIVATE} complexes.",
+                "limit":   MAX_COMPLEXES,
+                "message": f"Maximum {MAX_COMPLEXES} complexes per account. Delete old ones to create new.",
             }), 403
 
     data = request.get_json(silent=True) or {}
