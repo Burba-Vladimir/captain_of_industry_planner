@@ -33,46 +33,64 @@ def _norm_qty(q) -> float | None:
     return float(q) if q is not None else None
 
 
-def _fingerprint_json(r: dict) -> tuple:
-    """Fingerprint рецепта из recipes.json. null-qty сохраняется как None."""
+def _fingerprint_json(r: dict, with_cycle: bool = False) -> tuple:
+    """Fingerprint рецепта из recipes.json. null-qty сохраняется как None.
+    with_cycle=True — добавляет cycle_time_s для разрешения конфликтов."""
     ins  = frozenset((x["item"], _norm_qty(x["qty_per_cycle"])) for x in r.get("inputs",  []))
     outs = frozenset((x["item"], _norm_qty(x["qty_per_cycle"])) for x in r.get("outputs", []))
+    if with_cycle:
+        return (r["machine"], ins, outs, _norm_qty(r.get("cycle_time_s")))
     return (r["machine"], ins, outs)
 
 
-def _fingerprint_db(machine_name: str, flows: list) -> tuple:
+def _fingerprint_db(machine_name: str, flows: list,
+                    cycle_time_s: float | None = None, with_cycle: bool = False) -> tuple:
     """Fingerprint рецепта из БД. Фильтруем только None item (qty=None оставляем)."""
     valid = [f for f in flows if f.get("item") is not None]
     ins  = frozenset((f["item"], _norm_qty(f["qty"])) for f in valid if f["d"] == 0)
     outs = frozenset((f["item"], _norm_qty(f["qty"])) for f in valid if f["d"] == 1)
+    if with_cycle:
+        return (machine_name, ins, outs, cycle_time_s)
     return (machine_name, ins, outs)
 
 
 # ── Загрузка данных ──────────────────────────────────────────────
 
-def load_json_recipes(path: Path) -> dict[tuple, str]:
-    """Возвращает {fingerprint: wiki_id}."""
+def load_json_recipes(path: Path) -> tuple[dict[tuple, str], dict[tuple, str]]:
+    """Возвращает (base_map, cycle_map).
+    base_map  — {(machine, ins, outs): wiki_id}
+    cycle_map — {(machine, ins, outs, cycle): wiki_id}  (для разрешения конфликтов)
+    """
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
-    result: dict[tuple, str] = {}
-    duplicates: list[str] = []
+    base_map: dict[tuple, str]  = {}
+    cycle_map: dict[tuple, str] = {}
+    base_dups: list[str] = []
+
     for r in data:
         wiki_id = r.get("recipe_id")
         if not wiki_id:
             continue
-        fp = _fingerprint_json(r)
-        if fp in result:
-            duplicates.append(f"  ДУБЛЬ fingerprint: {wiki_id} vs {result[fp]}")
-        else:
-            result[fp] = wiki_id
 
-    if duplicates:
-        print(f"[warn] В recipes.json обнаружены дублирующиеся fingerprint'ы ({len(duplicates)}):")
-        for d in duplicates[:10]:
+        fp       = _fingerprint_json(r, with_cycle=False)
+        fp_cycle = _fingerprint_json(r, with_cycle=True)
+
+        if fp in base_map:
+            base_dups.append(f"  {wiki_id} vs {base_map[fp]}")
+        else:
+            base_map[fp] = wiki_id
+
+        # cycle_map: предупреждаем только если и с циклом дубль
+        if fp_cycle not in cycle_map:
+            cycle_map[fp_cycle] = wiki_id
+
+    if base_dups:
+        print(f"[info] Дубли по базовому fingerprint'у ({len(base_dups)}) — попробуем cycle_time_s:")
+        for d in base_dups[:5]:
             print(d)
 
-    return result
+    return base_map, cycle_map
 
 
 def load_db_recipes(cur) -> list[dict]:
@@ -129,7 +147,7 @@ def run(dry_run: bool = False) -> None:
     cur  = conn.cursor()
 
     print("Загружаем recipes.json …")
-    json_map = load_json_recipes(json_path)
+    json_map, json_cycle_map = load_json_recipes(json_path)
     print(f"  {len(json_map)} уникальных рецептов в JSON")
 
     print("Загружаем рецепты из БД …")
@@ -141,8 +159,8 @@ def run(dry_run: bool = False) -> None:
     unmatched   = []   # db рецепты без совпадения
     conflicted  = []   # wiki_id, на который претендуют >1 db записей
 
+    # Первый проход: базовый fingerprint (machine, ins, outs)
     # Конфликт: один (wiki_id, machine_id) претендует на >1 DB-записей
-    # (wiki_id, machine_id уникальный ключ в БД — нарушение = конфликт)
     wiki_machine_to_db: dict[tuple, list[int]] = {}
     for rec in db_recipes:
         fp = _fingerprint_db(rec["machine_name"], rec["flows"])
@@ -162,7 +180,17 @@ def run(dry_run: bool = False) -> None:
             continue
 
         if (wiki_id, rec["machine_id"]) in conflict_keys:
-            conflicted.append((rec["id"], wiki_id, rec["machine_name"]))
+            # Второй проход: уточняем по cycle_time_s
+            fp2 = _fingerprint_db(rec["machine_name"], rec["flows"],
+                                   cycle_time_s=rec["cycle_time_s"], with_cycle=True)
+            wiki_id2 = json_cycle_map.get(fp2)
+            if wiki_id2:
+                if rec["wiki_id"] == wiki_id2:
+                    already_ok += 1
+                else:
+                    to_update.append((rec["id"], wiki_id2, rec["machine_name"]))
+            else:
+                conflicted.append((rec["id"], wiki_id, rec["machine_name"]))
             continue
 
         if rec["wiki_id"] == wiki_id:
@@ -181,9 +209,10 @@ def run(dry_run: bool = False) -> None:
     print(f"{'='*55}")
 
     if conflicted:
-        print(f"\nКонфликты (один wiki_id у нескольких DB-записей, пропускаем):")
-        for db_id, wiki_id, mname in conflicted[:10]:
-            print(f"  id={db_id:5}  {mname:<30}  wiki_id={wiki_id}")
+        print(f"\n[!] ТРЕБУЕТ ВНИМАНИЯ: {len(conflicted)} рецептов не удалось сопоставить даже по cycle_time_s.")
+        print("    Добавьте маппинг вручную через coi_fixes.json или отдельный SQL-скрипт:")
+        for db_id, wiki_id, mname in conflicted:
+            print(f"  id={db_id:5}  {mname:<30}  предполагаемый wiki_id={wiki_id}")
 
     if to_update:
         print(f"\nПримеры обновлений (первые 10):")
