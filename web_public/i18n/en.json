@@ -50,6 +50,8 @@
     "likes": "{n} likes",
     "delete_confirm": "Delete this complex? This cannot be undone.",
     "limit_reached": "You've reached the free plan limit ({n} complexes). Upgrade to Premium for unlimited complexes.",
+    "guest_limit": "Guest limit reached ({n} complexes per browser/IP per 30 days). Sign in to create more.",
+    "service_overload": "Service is temporarily limiting guest creation. Please sign in to continue.",
     "publish_auth_title": "Sign in to publish",
     "publish_auth_body": "Publishing complexes to the community requires an account. Sign in to share your work with others."
   },

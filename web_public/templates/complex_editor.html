@@ -715,6 +715,47 @@
 
 <!-- ═══════════ SCRIPT ═══════════ -->
 <script>
+// ── Пассивный fingerprint ────────────────────────────────────────
+// Стабильный токен на основе характеристик браузера + случайного seed в localStorage.
+// Переживает чистку cookie, но не localStorage. Не собирает персональных данных.
+function getOrCreateFpToken() {
+  const KEY = 'coi_fp';
+  let token = localStorage.getItem(KEY);
+  if (token) return token;
+  // Компоненты: user-agent, screen, timezone, canvas hash, random seed
+  const parts = [
+    navigator.userAgent,
+    `${screen.width}x${screen.height}x${screen.colorDepth}`,
+    Intl.DateTimeFormat().resolvedOptions().timeZone,
+    (() => {
+      try {
+        const c = document.createElement('canvas');
+        c.width = 200; c.height = 50;
+        const ctx = c.getContext('2d');
+        ctx.textBaseline = 'top';
+        ctx.font = '14px Arial';
+        ctx.fillStyle = '#f60';
+        ctx.fillRect(125, 1, 62, 20);
+        ctx.fillStyle = '#069';
+        ctx.fillText('CoI🎮', 2, 15);
+        return c.toDataURL().slice(-32);
+      } catch { return 'nc'; }
+    })(),
+    Math.random().toString(36).slice(2), // уникальный seed для этого браузера
+  ];
+  // Простой hash
+  let h = 0;
+  const s = parts.join('|');
+  for (let i = 0; i < s.length; i++) { h = Math.imul(31, h) + s.charCodeAt(i) | 0; }
+  token = (h >>> 0).toString(16).padStart(8, '0') + '-' +
+          parts[4] + '-' +
+          Date.now().toString(36);
+  localStorage.setItem(KEY, token);
+  return token;
+}
+const _FP_TOKEN = getOrCreateFpToken();
+// ─────────────────────────────────────────────────────────────────
+
 const _ICON_RECIPE  = '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.474l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115l.094-.319z"/></svg>';
 const _ICON_COMPLEX = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="2" r="1.5" fill="currentColor" stroke="none"/><circle cx="2" cy="13" r="1.5" fill="currentColor" stroke="none"/><circle cx="14" cy="13" r="1.5" fill="currentColor" stroke="none"/><line x1="7.1" y1="3.3" x2="3" y2="11.5"/><line x1="8.9" y1="3.3" x2="13" y2="11.5"/><line x1="3.5" y1="13" x2="12.5" y2="13"/></svg>';
 
@@ -1614,10 +1655,15 @@ function complexEditor(complexId, readOnlyMode) {
         };
         const url=this.complexId?`/api/complex/${this.complexId}`:'/api/complex';
         const method=this.complexId?'PUT':'POST';
+        // fp_token нужен только при создании (POST) для anti-abuse
+        if (method==='POST') payload.fp_token = _FP_TOKEN;
         const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
         if (!r.ok) {
           const d=await r.json();
-          if (d.error==='limit_reached') { throw new Error(jt('complex.limit_reached',{n:d.limit})); }
+          if (d.error==='limit_reached')    { throw new Error(jt('complex.limit_reached',{n:d.limit})); }
+          if (d.error==='guest_ip_limit')  { throw new Error(jt('complex.guest_limit',{n:d.limit})); }
+          if (d.error==='guest_fp_limit')  { throw new Error(jt('complex.guest_limit',{n:d.limit})); }
+          if (d.error==='service_overload'){ throw new Error(jt('complex.service_overload')); }
           throw new Error(d.error||await r.text());
         }
         const result=await r.json();

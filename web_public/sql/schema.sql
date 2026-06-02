@@ -376,7 +376,13 @@ ALTER TABLE complexes
         CHECK (visibility IN ('private', 'public')),
     ADD COLUMN IF NOT EXISTS forked_from_id INT        REFERENCES complexes(id) ON DELETE SET NULL,
     ADD COLUMN IF NOT EXISTS slug           UUID       NOT NULL DEFAULT gen_random_uuid(),
-    ADD COLUMN IF NOT EXISTS likes_count    INT        NOT NULL DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS likes_count    INT        NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS creator_ip     INET,
+    ADD COLUMN IF NOT EXISTS fp_token       TEXT;
+
+-- Индекс для быстрой проверки лимита по IP (только для гостей)
+CREATE INDEX IF NOT EXISTS idx_complexes_creator_ip
+    ON complexes(creator_ip) WHERE creator_ip IS NOT NULL;
 
 -- visibility ENUM (если тип уже создан — используем его, иначе TEXT CHECK достаточно)
 DO $$ BEGIN

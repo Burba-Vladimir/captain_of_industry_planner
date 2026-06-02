@@ -191,8 +191,13 @@ limiter.limit("5 per hour")(app.view_functions["auth.email_send"])
 limiter.limit("10 per hour")(app.view_functions["auth.email_verify"])
 limiter.limit("10 per hour")(app.view_functions["auth.login_with_code"])
 
-# ── Лимит комплексов на пользователя ──────────────────────────
-MAX_COMPLEXES = int(os.environ.get("MAX_COMPLEXES_PER_USER", "30"))
+# ── Лимиты комплексов ─────────────────────────────────────────
+MAX_COMPLEXES       = int(os.environ.get("MAX_COMPLEXES_PER_USER", "30"))
+# Гости: не более N комплексов с одного IP или fingerprint за 30 дней
+GUEST_MAX_PER_IP    = int(os.environ.get("GUEST_MAX_COMPLEXES_PER_IP", "10"))
+GUEST_MAX_PER_FP    = int(os.environ.get("GUEST_MAX_COMPLEXES_PER_FP", "10"))
+# Аварийный клапан: если всего гостевых комплексов > порога — блокируем создание для гостей
+GUEST_GLOBAL_CAP    = int(os.environ.get("GUEST_GLOBAL_COMPLEX_CAP", "5000"))
 
 # Гостевые сессии
 GUEST_COOKIE      = "coi_guest"
@@ -1247,9 +1252,12 @@ def _save_complex_graph(con, complex_id, data, user_id: int | None):
                 )
                 count = cur.fetchone()[0]
                 # is_premium проверяется выше в роуте
+            creator_ip = data.get("_creator_ip")
+            fp_token   = data.get("_fp_token")
             cur.execute(
-                "INSERT INTO complexes (name, user_id) VALUES (%s, %s) RETURNING id",
-                (name, user_id),
+                "INSERT INTO complexes (name, user_id, creator_ip, fp_token) "
+                "VALUES (%s, %s, %s::inet, %s) RETURNING id",
+                (name, user_id, creator_ip, fp_token),
             )
             complex_id = cur.fetchone()[0]
 
@@ -1337,26 +1345,81 @@ def _save_complex_graph(con, complex_id, data, user_id: int | None):
 
 
 @app.route("/api/complex", methods=["POST"])
-@limiter.limit("30 per hour")   # rate: не более 30 новых комплексов в час с одного IP
+@limiter.limit("20 per hour")   # rate: не более 20 новых комплексов в час с одного IP
 def api_complex_create():
-    # Гости тоже могут создавать комплексы (g.user всегда установлен)
-    # Проверить суммарный лимит (premium пользователи без ограничений)
-    if not g.user.get("is_premium"):
+    user      = g.user
+    is_guest  = user.get("is_guest", False)
+    client_ip = get_remote_address()
+    fp_token  = (request.get_json(silent=True) or {}).get("fp_token") or \
+                request.headers.get("X-FP-Token")
+
+    # ── Аварийный клапан: глобальный лимит гостевых комплексов ──
+    if is_guest:
         with get_db() as con:
             with con.cursor() as cur:
-                cur.execute(
-                    "SELECT COUNT(*) FROM complexes WHERE user_id = %s",
-                    (g.user["id"],),
-                )
-                count = cur.fetchone()[0]
-        if count >= MAX_COMPLEXES:
-            return jsonify({
-                "error":   "limit_reached",
-                "limit":   MAX_COMPLEXES,
-                "message": f"Maximum {MAX_COMPLEXES} complexes per account. Delete old ones to create new.",
-            }), 403
+                cur.execute("""
+                    SELECT COUNT(*) FROM complexes c
+                    JOIN users u ON u.id = c.user_id
+                    WHERE u.is_guest = TRUE
+                """)
+                if cur.fetchone()[0] >= GUEST_GLOBAL_CAP:
+                    return jsonify({
+                        "error":   "service_overload",
+                        "message": "Guest complex limit reached globally. Please sign in to continue.",
+                    }), 503
+
+    # ── Лимит по IP (для гостей) ────────────────────────────────
+    if is_guest and client_ip:
+        with get_db() as con:
+            with con.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*) FROM complexes c
+                    JOIN users u ON u.id = c.user_id
+                    WHERE u.is_guest = TRUE
+                      AND c.creator_ip = %s::inet
+                      AND c.created_at > NOW() - INTERVAL '30 days'
+                """, (client_ip,))
+                if cur.fetchone()[0] >= GUEST_MAX_PER_IP:
+                    return jsonify({
+                        "error":   "guest_ip_limit",
+                        "limit":   GUEST_MAX_PER_IP,
+                        "message": f"Maximum {GUEST_MAX_PER_IP} guest complexes per IP per 30 days. Sign in to create more.",
+                    }), 403
+
+    # ── Лимит по fingerprint (для гостей) ───────────────────────
+    if is_guest and fp_token:
+        with get_db() as con:
+            with con.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*) FROM complexes c
+                    JOIN users u ON u.id = c.user_id
+                    WHERE u.is_guest = TRUE
+                      AND c.fp_token = %s
+                      AND c.created_at > NOW() - INTERVAL '30 days'
+                """, (fp_token,))
+                if cur.fetchone()[0] >= GUEST_MAX_PER_FP:
+                    return jsonify({
+                        "error":   "guest_fp_limit",
+                        "limit":   GUEST_MAX_PER_FP,
+                        "message": f"Maximum {GUEST_MAX_PER_FP} guest complexes per browser per 30 days. Sign in to create more.",
+                    }), 403
+
+    # ── Лимит залогиненных (premium без ограничений) ────────────
+    if not user.get("is_premium") and not is_guest:
+        with get_db() as con:
+            with con.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM complexes WHERE user_id = %s", (user["id"],))
+                if cur.fetchone()[0] >= MAX_COMPLEXES:
+                    return jsonify({
+                        "error":   "limit_reached",
+                        "limit":   MAX_COMPLEXES,
+                        "message": f"Maximum {MAX_COMPLEXES} complexes per account. Delete old ones to create new.",
+                    }), 403
 
     data = request.get_json(silent=True) or {}
+    # Записываем IP и fp_token для anti-abuse
+    data["_creator_ip"] = client_ip
+    data["_fp_token"]   = fp_token
     try:
         with get_db() as con:
             cid = _save_complex_graph(con, None, data, g.user["id"])
