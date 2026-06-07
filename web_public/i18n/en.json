@@ -45,6 +45,8 @@
     "publish": "Publish",
     "unpublish": "Make Private",
     "fork": "Copy to My Complexes",
+    "copy": "Copy",
+    "edit": "Edit",
     "view_readonly": "View (read-only)",
     "forked_from": "Forked from",
     "likes": "{n} likes",
@@ -77,6 +79,7 @@
     "complexes": "Complexes",
     "show_hidden": "Hidden",
     "records": "records",
+    "refresh": "Refresh",
     "col_name": "Machine / Complex",
     "col_maint": "Maint.",
     "col_inputs": "Inputs",
@@ -103,7 +106,16 @@
     "delete_confirm_one": "Complex will be permanently deleted:",
     "delete_confirm_many": "Complexes to be permanently deleted",
     "cancel": "Cancel",
-    "delete_forever": "Delete permanently"
+    "delete_forever": "Delete permanently",
+    "contents": "Contents",
+    "cycle_label": "Cycle",
+    "workers_unit": "workers",
+    "time_just_now":  "just now",
+    "time_min_ago":   "{n}m ago",
+    "time_hour_ago":  "{n}h ago",
+    "time_day_ago":   "{n}d ago",
+    "time_month_ago": "{n}mo ago",
+    "time_year_ago":  "{n}y ago"
   },
   "editor": {
     "back": "Back",
@@ -128,12 +140,24 @@
     "picker_searching": "Searching…",
     "picker_nothing": "Nothing found",
     "run_full": "Run at full capacity",
+    "satisfy_demand": "Satisfy resource demand",
+    "lcm_conflict_title": "Multiple demand-satisfaction connectors",
+    "lcm_conflict_body": "After connecting via LCM, the group would have more than one demand-satisfaction connector. Choose which one to keep, or cancel.",
+    "lcm_conflict_keep": "Keep",
+    "lcm_conflict_cancel": "Cancel LCM connection",
+    "lcm_one_idle": "Only one resource can have a demand-satisfaction connector across the whole LCM group.",
+    "lcm_cycle": "Cannot enable LCM: the connections form a cycle with no consistent integer ratio solution.",
     "no_inputs": "no inputs",
     "no_outputs": "no outputs",
     "producers": "Producers",
     "consumers": "Consumers",
     "open_complex": "Open complex contents",
-    "remove_node": "Remove node"
+    "remove_node": "Remove node",
+    "per_min": "/min",
+    "per_cycle": "/c",
+    "lcm_tip_active":    "Balance on · click to disable",
+    "lcm_tip_inactive":  "Balance off · click to enable",
+    "lcm_tip_active_ro": "Balance on"
   },
   "picker": {
     "produces": "Produces",
@@ -147,9 +171,55 @@
     "saved_body": "Your complex is stored in your current session. Sign in to keep it across devices and protect it from being lost if you clear your cookies.",
     "continue_guest": "Continue without signing in"
   },
+  "community": {
+    "sort_new":     "New",
+    "sort_popular": "Popular",
+    "total":        "{n} complexes",
+    "empty":        "No public complexes yet. Be the first!",
+    "view":         "View",
+    "fork_success": "Copied! Open your new complex now?",
+    "date": "Updated",
+    "forks_hint": "Times copied by users",
+    "col_name": "Complex",
+    "search_placeholder": "name · by:author · in:resource · out:resource · #tag"
+  },
   "errors": {
     "not_found": "Not found",
     "forbidden": "You don't have permission to edit this complex.",
     "login_required": "Please sign in to perform this action."
+  },
+  "cascade": {
+    "publish_title": "Publish nested complexes?",
+    "publish_body": "This complex contains {n} private nested complex(es) that will also be published:",
+    "publish_all": "Publish all",
+    "unpublish_title": "Unpublish dependent complexes?",
+    "unpublish_body": "This complex is used in {n} public complex(es) that will also be unpublished:",
+    "unpublish_all": "Unpublish all",
+    "dep_warning": "This complex is used in {n} other complex(es). Changes may affect them.",
+    "delete_deps_warning": "This complex is used in {n} other complex(es):",
+    "delete_chain": "Delete all"
+  },
+  "subscriptions": {
+    "subscribe": "Bookmark",
+    "unsubscribe": "Remove bookmark",
+    "unsubscribe_confirm": "Remove this complex from your bookmarks?",
+    "subscribed_badge": "Bookmarked",
+    "login_required": "Sign in to bookmark complexes"
+  },
+  "tags": {
+    "placeholder": "add tag…",
+    "search_hint": "Click to filter by tag"
+  },
+  "ghost": {
+    "edited_notice": "This complex has been updated by its author.",
+    "privatized_notice": "This complex is no longer public.",
+    "deleted_notice": "This complex has been deleted by its author.",
+    "see_new_version": "See new version",
+    "no_new_version": "New version unavailable",
+    "node_tag": "(old version)",
+    "frozen_likes": "Likes at the time of snapshot",
+    "view_notice_edited": "You are viewing a frozen snapshot — the original has been updated by its author.",
+    "view_notice_privatized": "You are viewing a frozen snapshot — the original is no longer public.",
+    "view_notice_deleted": "You are viewing a frozen snapshot — the original has been deleted by its author."
   }
 }

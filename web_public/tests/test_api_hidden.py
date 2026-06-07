@@ -27,7 +27,7 @@ class TestToggleHidden:
     def test_show_hidden_includes_recipe(self, client):
         """С параметром hidden=true скрытый рецепт возвращается."""
         client.patch(f"/api/node/recipe/{RECIPE_ID}/hidden", json={"hidden": True})
-        r = client.get("/api/nodes?type=recipe&hidden=true")
+        r = client.get("/api/nodes?type=recipe&hidden=true&q=Test+Smelter")
         data = r.get_json()
         names = [i.get("machine_name") for i in data["items"]]
         assert "Test Smelter" in names
@@ -36,7 +36,7 @@ class TestToggleHidden:
         """После снятия hidden рецепт снова виден."""
         client.patch(f"/api/node/recipe/{RECIPE_ID}/hidden", json={"hidden": True})
         client.patch(f"/api/node/recipe/{RECIPE_ID}/hidden", json={"hidden": False})
-        r = client.get("/api/nodes?type=recipe")
+        r = client.get("/api/nodes?type=recipe&q=Test+Smelter")
         data = r.get_json()
         names = [i.get("machine_name") for i in data["items"]]
         assert "Test Smelter" in names

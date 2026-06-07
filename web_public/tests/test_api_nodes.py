@@ -21,7 +21,7 @@ class TestApiNodes:
 
     def test_seed_recipe_present(self, client):
         """Тестовый рецепт Test Smelter (id=9001) виден в списке."""
-        r = client.get("/api/nodes?type=recipe")
+        r = client.get("/api/nodes?type=recipe&q=Test+Smelter")
         data = r.get_json()
         names = [item.get("machine_name") for item in data["items"]]
         assert "Test Smelter" in names
@@ -55,10 +55,10 @@ class TestApiNodes:
         assert data["items"] == []
 
     def test_pagination(self, client):
-        """per_page=1 возвращает ровно 1 запись."""
-        r = client.get("/api/nodes?per_page=1&type=recipe")
+        """per_page=10 возвращает ровно 10 записей (минимальный размер страницы)."""
+        r = client.get("/api/nodes?per_page=10&type=recipe")
         data = r.get_json()
-        assert len(data["items"]) == 1
+        assert len(data["items"]) == 10
 
     def test_item_fields(self, client):
         """Каждый элемент содержит обязательные поля."""

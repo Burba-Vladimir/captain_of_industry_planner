@@ -2,6 +2,7 @@
 Smoke-тесты: страницы отдают 200 и нужный контент.
 """
 import pytest
+from tests.conftest import make_complex_payload
 
 
 class TestIndex:
@@ -35,3 +36,44 @@ class TestComplexRoutes:
     def test_nonexistent_complex_view_404(self, client):
         r = client.get("/complex/00000000-0000-0000-0000-000000000000/view")
         assert r.status_code == 404
+
+    def test_edit_route_uses_slug(self, client):
+        """Маршрут /complex/{slug}/edit работает с UUID-slug из API.
+
+        Фиксирует баг: раньше index.html строил URL с числовым c.id,
+        а маршрут искал по slug — это давало 404.
+        """
+        r = client.post("/api/complex", json=make_complex_payload("Slug Edit Test"))
+        assert r.status_code == 201
+        slug = r.get_json().get("slug")
+        assert slug is not None, "API должен возвращать поле slug"
+
+        r2 = client.get(f"/complex/{slug}/edit")
+        assert r2.status_code == 200
+
+    def test_numeric_id_in_edit_route_gives_404(self, client):
+        """Числовой id (не UUID slug) в URL редактора даёт 404.
+
+        Проверяет, что маршрут ищет именно по slug, а не по id.
+        """
+        r = client.post("/api/complex", json=make_complex_payload("Numeric ID Test"))
+        assert r.status_code == 201
+        cid = r.get_json()["id"]
+
+        r2 = client.get(f"/complex/{cid}/edit")
+        assert r2.status_code == 404
+
+    def test_view_route_uses_slug(self, client):
+        """Маршрут /complex/{slug}/view работает с UUID-slug.
+
+        Фиксирует аналогичный баг для Community-вкладки.
+        Владелец перенаправляется с /view на /edit (новое поведение — auto-redirect).
+        """
+        r = client.post("/api/complex", json=make_complex_payload("Slug View Test"))
+        assert r.status_code == 201
+        slug = r.get_json().get("slug")
+        assert slug is not None
+
+        # Владелец → 302 на /edit, затем 200
+        r2 = client.get(f"/complex/{slug}/view", follow_redirects=True)
+        assert r2.status_code == 200

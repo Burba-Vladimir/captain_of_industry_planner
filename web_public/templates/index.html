@@ -43,6 +43,27 @@
       if (vars) Object.entries(vars).forEach(([k, val]) => { v = v.replace('{' + k + '}', val); });
       return v;
     }
+    /* Relative time helper (e.g. "2 days ago") */
+    function relativeTime(iso) {
+      if (!iso) return '';
+      // Нормализация: PostgreSQL может вернуть пробел вместо T и 6 знаков микросекунд
+      let s = String(iso).trim().replace(' ', 'T');   // "2024-01-15 10:00:00" → "…T…"
+      s = s.replace(/(\.\d{3})\d+/, '$1');             // 6 знаков → 3 (JS Date: только мс)
+      if (!/[Zz]$|[+-]\d{2}:?\d{2}$/.test(s)) s += 'Z'; // добавить UTC если нет TZ
+      const ms = new Date(s).getTime();
+      if (isNaN(ms)) return '';
+      const sec = Math.floor((Date.now() - ms) / 1000);
+      if (sec < 0) return jt('browse.time_just_now');
+      const t = (k, n) => jt('browse.' + k).replace('{n}', n);
+      if (sec < 60)    return t('time_just_now', '');
+      if (sec < 3600)  return t('time_min_ago',   Math.floor(sec / 60));
+      if (sec < 86400) return t('time_hour_ago',  Math.floor(sec / 3600));
+      const days = Math.floor(sec / 86400);
+      if (days < 30)   return t('time_day_ago',   days);
+      const months = Math.floor(days / 30);
+      if (months < 12) return t('time_month_ago', months);
+      return t('time_year_ago', Math.floor(months / 12));
+    }
   </script>
 </head>
 
@@ -87,7 +108,7 @@
       <input type="search"
              x-model.debounce.400="communityQ"
              @input.debounce.400="communityPage=1; loadCommunity()"
-             placeholder="{{ t('nav.public') }}…"
+             placeholder="{{ t('community.search_placeholder') }}"
              class="w-full px-3 py-1.5 pr-7 rounded-lg border border-slate-300 dark:border-slate-600 text-sm
                     focus:outline-none focus:ring-2 focus:ring-blue-400
                     bg-white dark:bg-slate-700 dark:text-slate-100">
@@ -179,6 +200,17 @@
       </label>
       <span class="ml-auto text-xs text-slate-400 dark:text-slate-500"
             x-text="total + ' {{ t('browse.records') }}'"></span>
+      <button @click="loadBrowse()"
+              class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 dark:text-slate-500
+                     hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              :title="jt('browse.refresh')">
+        <svg viewBox="0 0 20 20" fill="none" class="w-4 h-4">
+          <path d="M17 3v4h-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M3 10a7 7 0 0112.4-4.4L17 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M3 17v-4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M17 10a7 7 0 01-12.4 4.4L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
     </div>
 
     <!-- Loading -->
@@ -233,8 +265,11 @@
                 <input type="checkbox" class="rounded accent-blue-500 cursor-pointer"
                        :checked="isSelected(node)" @change="toggleSelect(node)">
               </td>
-              <td class="px-2 py-2 text-slate-300 text-xs select-none"
-                  x-text="node._open ? '▼' : '▶'"></td>
+              <td class="px-2 py-2 text-slate-400 dark:text-slate-500 select-none">
+                <svg viewBox="0 0 8 8" fill="currentColor" class="w-2 h-2 transition-transform duration-150" :class="node._open ? 'rotate-90' : ''">
+                  <polygon points="1,0.5 7.5,4 1,7.5"/>
+                </svg>
+              </td>
               <td class="px-4 py-2.5">
                 <div class="flex items-center gap-2 flex-wrap">
                   <span :class="node.node_type==='recipe' ? 'bg-blue-100 text-blue-700' : 'bg-violet-100 text-violet-700'"
@@ -245,6 +280,37 @@
                         @click.stop="clickNodeName(node)"
                         :title="node.node_type==='complex' ? '{{ t('browse.open_editor') }}' : '{{ t('browse.search_by') }}' + (node.machine_name ?? node.name)"
                         x-text="node.machine_name ?? node.name"></span>
+                  <!-- Public badge (only for own complexes) -->
+                  <span x-show="node.node_type==='complex' && node.visibility==='public' && !node._subscribed"
+                        class="text-emerald-500 dark:text-emerald-400 opacity-70"
+                        :title="'{{ t('complex.visibility_public') }}'">
+                    <svg viewBox="0 0 16 16" fill="none" class="w-3.5 h-3.5 inline-block">
+                      <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/>
+                      <ellipse cx="8" cy="8" rx="3" ry="6.5" stroke="currentColor" stroke-width="1.4"/>
+                      <line x1="1.5" y1="6" x2="14.5" y2="6" stroke="currentColor" stroke-width="1.2"/>
+                      <line x1="1.5" y1="10" x2="14.5" y2="10" stroke="currentColor" stroke-width="1.2"/>
+                    </svg>
+                  </span>
+                  <!-- Bookmark badge (subscribed community complex) -->
+                  <span x-show="node.node_type==='complex' && node._subscribed"
+                        class="text-rose-500"
+                        :title="jt('subscriptions.subscribed_badge')">
+                    <svg viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5 inline-block">
+                      <path d="M3 2a1 1 0 011-1h8a1 1 0 011 1v12l-5-2.5L3 14V2z"/>
+                    </svg>
+                  </span>
+                </div>
+                <!-- Tags (complexes only) -->
+                <div x-show="node.node_type==='complex' && node.tags && node.tags.length"
+                     class="flex items-center gap-1 flex-wrap mt-1">
+                  <template x-for="tag in (node.tags || [])" :key="tag">
+                    <button @click.stop="q='tag:'+tag; page=1; loadBrowse()"
+                            class="text-xs px-1.5 py-0.5 rounded-full
+                                   bg-blue-50 dark:bg-blue-900/30 text-blue-500 dark:text-blue-400
+                                   border border-blue-200 dark:border-blue-700
+                                   hover:bg-blue-100 dark:hover:bg-blue-800/50 transition-colors"
+                            :title="jt('tags.search_hint')">#<span x-text="tag"></span></button>
+                  </template>
                 </div>
               </td>
               <td class="px-4 py-2 text-right text-slate-500 dark:text-slate-400">
@@ -262,8 +328,8 @@
                 <div class="flex flex-col gap-0.5">
                   <template x-for="m in node.maintenance" :key="m.item">
                     <span class="inline-flex items-center gap-1">
-                      <span class="item-icon">
-                        <img :src="iconOf(m.item)" @error="$el.parentElement.classList.add('no-img')" loading="lazy">
+                      <span class="item-icon" :title="m.item_en && m.item_en !== m.item ? m.item + ' / ' + m.item_en : m.item">
+                        <img :src="iconOf(m.item_en||m.item)" @error="$el.parentElement.classList.add('no-img')" loading="lazy">
                         <span class="item-label chip bg-amber-50 text-amber-700 border border-amber-100" x-text="m.item"></span>
                       </span>
                       <span class="text-xs tabular-nums text-slate-500 font-medium" x-text="m.rate_per_min"></span>
@@ -277,8 +343,8 @@
                   <template x-for="it in node.inputs" :key="it.item">
                     <span class="inline-flex items-center gap-0.5 cursor-pointer hover:opacity-70 transition-opacity"
                           @click.stop="searchExact(it.item)">
-                      <span class="item-icon">
-                        <img :src="iconOf(it.item)" @error="$el.parentElement.classList.add('no-img')" loading="lazy">
+                      <span class="item-icon" :title="it.item_en && it.item_en !== it.item ? it.item + ' / ' + it.item_en : it.item">
+                        <img :src="iconOf(it.item_en||it.item)" @error="$el.parentElement.classList.add('no-img')" loading="lazy">
                         <span class="item-label chip bg-red-50 text-red-700 border border-red-100" x-text="it.item"></span>
                       </span>
                       <span x-show="it.qty_per_min != null"
@@ -294,8 +360,8 @@
                   <template x-for="it in node.outputs" :key="it.item">
                     <span class="inline-flex items-center gap-0.5 cursor-pointer hover:opacity-70 transition-opacity"
                           @click.stop="searchExact(it.item)">
-                      <span class="item-icon">
-                        <img :src="iconOf(it.item)" @error="$el.parentElement.classList.add('no-img')" loading="lazy">
+                      <span class="item-icon" :title="it.item_en && it.item_en !== it.item ? it.item + ' / ' + it.item_en : it.item">
+                        <img :src="iconOf(it.item_en||it.item)" @error="$el.parentElement.classList.add('no-img')" loading="lazy">
                         <span class="item-label chip bg-emerald-50 text-emerald-700 border border-emerald-100" x-text="it.item"></span>
                       </span>
                       <span x-show="it.qty_per_min != null"
@@ -310,9 +376,9 @@
                 <!-- Создать комплекс на основе рецепта -->
                 <a x-show="node.node_type==='recipe'"
                    :href="'/complex/new?from_type=recipe&from_id=' + node.node_id"
-                   class="inline-flex items-center justify-center w-6 h-6 opacity-30 hover:opacity-80 hover:scale-110 transition-all mr-1 text-slate-600 dark:text-slate-400"
+                   class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
                    :title="'{{ t('browse.new_from_recipe') }}'">
-                  <svg viewBox="0 0 20 20" fill="none" class="w-4 h-4">
+                  <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
                     <circle cx="3" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/>
                     <circle cx="17" cy="4" r="2.5" stroke="currentColor" stroke-width="1.5"/>
                     <circle cx="17" cy="16" r="2.5" stroke="currentColor" stroke-width="1.5"/>
@@ -323,9 +389,9 @@
                 <!-- Создать новый комплекс с этим в качестве основы -->
                 <a x-show="node.node_type==='complex'"
                    :href="'/complex/new?from_type=complex&from_id=' + node.node_id"
-                   class="inline-flex items-center justify-center w-6 h-6 opacity-30 hover:opacity-80 hover:scale-110 transition-all mr-1 text-slate-600 dark:text-slate-400"
+                   class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
                    :title="'{{ t('browse.new_from_complex') }}'">
-                  <svg viewBox="0 0 20 20" fill="none" class="w-4 h-4">
+                  <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
                     <circle cx="3" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/>
                     <circle cx="17" cy="4" r="2.5" stroke="currentColor" stroke-width="1.5"/>
                     <circle cx="17" cy="16" r="2.5" stroke="currentColor" stroke-width="1.5"/>
@@ -333,22 +399,76 @@
                     <line x1="5.3" y1="11.0" x2="14.7" y2="15.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
                   </svg>
                 </a>
-                <!-- Редактировать комплекс -->
-                <a x-show="node.node_type==='complex' && node.slug"
-                   :href="'/complex/' + node.slug + '/edit'"
-                   class="inline-block text-sm opacity-30 hover:opacity-80 hover:scale-110 transition-all mr-1"
-                   :title="'{{ t('browse.edit_complex') }}'">✏️</a>
-                <!-- Удалить комплекс (только владелец) -->
-                <button x-show="node.node_type==='complex'"
+                <!-- Редактировать комплекс (только свои) -->
+                <a x-show="node.node_type==='complex' && node.slug && !node._subscribed"
+                   :href="'/complex/' + node.slug + '/edit?back=' + encodeURIComponent(location.href)"
+                   class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
+                   :title="'{{ t('browse.edit_complex') }}'">
+                  <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
+                    <path d="M13.5 3.5l3 3L7 16H4v-3L13.5 3.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                    <line x1="11" y1="6" x2="14" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                  </svg>
+                </a>
+                <!-- Просмотр чужого (подписанного) комплекса -->
+                <a x-show="node.node_type==='complex' && node.slug && node._subscribed"
+                   :href="'/complex/' + node.slug + '/view?back=' + encodeURIComponent(location.href)"
+                   class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
+                   :title="jt('community.view')">
+                  <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
+                    <path d="M9 4H4a1 1 0 00-1 1v11a1 1 0 001 1h11a1 1 0 001-1v-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <polyline points="13,3 17,3 17,7" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+                    <line x1="10.5" y1="9.5" x2="17" y2="3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                  </svg>
+                </a>
+                <!-- Форк комплекса (только свои) -->
+                <button x-show="node.node_type==='complex' && !node._subscribed"
+                        @click="forkOwnComplex({id: node.node_id})"
+                        class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:text-blue-500
+                               hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
+                        :title="jt('complex.copy')">
+                  <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
+                    <rect x="7" y="7" width="9.5" height="10.5" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M13 7V5.5A1.5 1.5 0 0011.5 4h-7A1.5 1.5 0 003 5.5v8A1.5 1.5 0 004.5 15H7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+                <!-- Удалить комплекс (только свои) -->
+                <button x-show="node.node_type==='complex' && !node._subscribed"
                         @click="askDelete(node)"
-                        class="text-sm leading-none opacity-20 hover:opacity-80 hover:text-red-500
-                               hover:scale-110 transition-all mr-1"
-                        :title="'{{ t('browse.delete_complex') }}'">🗑</button>
-                <!-- Скрыть / показать -->
-                <button @click="toggleHidden(node)"
+                        class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:text-red-500
+                               hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
+                        :title="'{{ t('browse.delete_complex') }}'">
+                  <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
+                    <path d="M4 6h12M8 6V4h4v2M7 6v9a1 1 0 001 1h4a1 1 0 001-1V6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <line x1="9" y1="10" x2="9" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    <line x1="11" y1="10" x2="11" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                  </svg>
+                </button>
+                <!-- Отписаться (только подписанные) — с подтверждением -->
+                <button x-show="node.node_type==='complex' && node._subscribed"
+                        @click="unsubscribeFromBrowse(node)"
+                        class="inline-flex items-center justify-center w-6 h-6 text-rose-500 hover:text-rose-700
+                               hover:scale-110 transition-all"
+                        :title="jt('subscriptions.unsubscribe')">
+                  <svg viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
+                    <path d="M5 3a1 1 0 011-1h8a1 1 0 011 1v13l-5-2.5L5 16V3z"/>
+                  </svg>
+                </button>
+                <!-- Скрыть / показать (только свои рецепты/комплексы) -->
+                <button x-show="!node._subscribed"
+                        @click="toggleHidden(node)"
                         :title="node.deprecated ? '{{ t('browse.show') }}' : '{{ t('browse.hide') }}'"
-                        class="text-base opacity-50 hover:opacity-100 hover:scale-110 transition-all">
-                  <span x-text="node.deprecated ? '🙈' : '👁'"></span>
+                        class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400">
+                  <!-- item hidden → show (open eye) -->
+                  <svg x-show="node.deprecated" viewBox="0 0 20 20" fill="none" class="w-5 h-5">
+                    <ellipse cx="10" cy="10" rx="7.5" ry="5" stroke="currentColor" stroke-width="1.5"/>
+                    <circle cx="10" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+                  </svg>
+                  <!-- item visible → hide (crossed eye) -->
+                  <svg x-show="!node.deprecated" viewBox="0 0 20 20" fill="none" class="w-5 h-5">
+                    <ellipse cx="10" cy="10" rx="7.5" ry="5" stroke="currentColor" stroke-width="1.5"/>
+                    <circle cx="10" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+                    <line x1="3" y1="3" x2="17" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                  </svg>
                 </button>
               </td>
             </tr>
@@ -362,10 +482,10 @@
                     <template x-if="node.node_type==='recipe'">
                       <div class="text-xs text-slate-500 dark:text-slate-400 space-y-1">
                         <p x-show="node.cycle_time_s">
-                          ⏱ Cycle: <b class="text-slate-700 dark:text-slate-300" x-text="node.cycle_time_s + 's'"></b>
+                          ⏱ <span x-text="jt('browse.cycle_label')"></span>: <b class="text-slate-700 dark:text-slate-300" x-text="node.cycle_time_s + 's'"></b>
                         </p>
                         <p>🏭 <span x-text="node.machine_name"></span></p>
-                        <p x-show="node.workers > 0">👷 <span x-text="node.workers + ' workers'"></span></p>
+                        <p x-show="node.workers > 0">👷 <span x-text="node.workers + ' ' + jt('browse.workers_unit')"></span></p>
                         <p x-show="node.electricity_kw && node.electricity_kw !== 0">
                           ⚡ <span :class="node.electricity_kw < 0 ? 'text-emerald-600' : 'text-orange-500'"
                                    x-text="Math.abs(node.electricity_kw) + ' kW'"></span>
@@ -374,10 +494,10 @@
                     </template>
                     <template x-if="node.node_type==='complex'">
                       <div>
-                        <p class="text-xs font-semibold text-violet-600 mb-1.5 uppercase tracking-wide">Contents</p>
-                        <div x-show="!node._members" class="text-xs text-slate-300">Loading…</div>
+                        <p class="text-xs font-semibold text-violet-600 mb-1.5 uppercase tracking-wide">{{ t('browse.contents') }}</p>
+                        <div x-show="!node._members" class="text-xs text-slate-300 dark:text-slate-600">{{ t('browse.loading') }}</div>
                         <div class="space-y-0.5">
-                          <template x-for="m in (node._members||[])" :key="m.label+':'+m.count">
+                          <template x-for="(m, mi) in (node._members||[])" :key="mi">
                             <div class="flex items-center justify-between text-xs gap-2">
                               <span class="flex items-center gap-1.5">
                                 <span class="tabular-nums font-bold text-slate-500 min-w-[1.5rem] text-right"
@@ -399,50 +519,50 @@
                     </template>
                   </div>
                   <div x-show="node.maintenance && node.maintenance.length>0">
-                    <p class="text-xs font-semibold text-amber-600 mb-1.5 uppercase tracking-wide">Maintenance</p>
+                    <p class="text-xs font-semibold text-amber-600 mb-1.5 uppercase tracking-wide">{{ t('browse.col_maint') }}</p>
                     <div class="space-y-1">
                       <template x-for="m in (node.maintenance||[])" :key="m.item">
                         <div class="flex justify-between text-xs gap-4">
                           <span class="flex items-center gap-1.5">
-                            <img :src="iconOf(m.item)" @error="$el.style.display='none'" class="w-4 h-4 object-contain shrink-0" loading="lazy">
+                            <img :src="iconOf(m.item_en||m.item)" @error="$el.style.display='none'" class="w-4 h-4 object-contain shrink-0" loading="lazy">
                             <span x-text="m.item" class="dark:text-slate-300"></span>
                           </span>
-                          <span class="tabular-nums shrink-0 text-slate-400" x-text="m.rate_per_min+'/min'"></span>
+                          <span class="tabular-nums shrink-0 text-slate-400" x-text="m.rate_per_min+jt('editor.per_min')"></span>
                         </div>
                       </template>
                     </div>
                   </div>
                   <div x-show="node.inputs.length>0">
-                    <p class="text-xs font-semibold text-red-600 mb-1.5 uppercase tracking-wide">Inputs</p>
+                    <p class="text-xs font-semibold text-red-600 mb-1.5 uppercase tracking-wide">{{ t('browse.col_inputs') }}</p>
                     <div class="space-y-1">
                       <template x-for="it in node.inputs" :key="it.item">
                         <div class="flex justify-between text-xs gap-4 cursor-pointer hover:text-blue-600 group"
                              @click="searchExact(it.item)">
                           <span class="flex items-center gap-1.5">
-                            <img :src="iconOf(it.item)" @error="$el.style.display='none'" class="w-4 h-4 object-contain shrink-0" loading="lazy">
+                            <img :src="iconOf(it.item_en||it.item)" @error="$el.style.display='none'" class="w-4 h-4 object-contain shrink-0" loading="lazy">
                             <span x-text="it.item" class="dark:text-slate-300 group-hover:text-blue-600"></span>
                           </span>
                           <span class="tabular-nums shrink-0 text-slate-400">
                             <span x-show="it.qty_per_cycle!=null" x-text="it.qty_per_cycle+'/c · '"></span>
-                            <span x-show="it.qty_per_min!=null" x-text="it.qty_per_min+'/min'"></span>
+                            <span x-show="it.qty_per_min!=null" x-text="it.qty_per_min+jt('editor.per_min')"></span>
                           </span>
                         </div>
                       </template>
                     </div>
                   </div>
                   <div x-show="node.outputs.length>0">
-                    <p class="text-xs font-semibold text-emerald-600 mb-1.5 uppercase tracking-wide">Outputs</p>
+                    <p class="text-xs font-semibold text-emerald-600 mb-1.5 uppercase tracking-wide">{{ t('browse.col_outputs') }}</p>
                     <div class="space-y-1">
                       <template x-for="it in node.outputs" :key="it.item">
                         <div class="flex justify-between text-xs gap-4 cursor-pointer hover:text-blue-600 group"
                              @click="searchExact(it.item)">
                           <span class="flex items-center gap-1.5">
-                            <img :src="iconOf(it.item)" @error="$el.style.display='none'" class="w-4 h-4 object-contain shrink-0" loading="lazy">
+                            <img :src="iconOf(it.item_en||it.item)" @error="$el.style.display='none'" class="w-4 h-4 object-contain shrink-0" loading="lazy">
                             <span x-text="it.item" class="dark:text-slate-300 group-hover:text-blue-600"></span>
                           </span>
                           <span class="tabular-nums shrink-0 text-slate-400">
                             <span x-show="it.qty_per_cycle!=null" x-text="it.qty_per_cycle+'/c · '"></span>
-                            <span x-show="it.qty_per_min!=null" x-text="it.qty_per_min+'/min'"></span>
+                            <span x-show="it.qty_per_min!=null" x-text="it.qty_per_min+jt('editor.per_min')"></span>
                           </span>
                         </div>
                       </template>
@@ -481,61 +601,6 @@
   </div><!-- /browse tab -->
 
 
-  <!-- ─── MY COMPLEXES TAB ─── -->
-  {% if user %}
-  <div x-show="tab==='mine'">
-    <div x-show="mineLoading" class="flex items-center justify-center py-24 text-slate-400 dark:text-slate-500">
-      <div class="text-4xl animate-spin mr-3">⚙</div> Loading…
-    </div>
-    <div x-show="!mineLoading && mineItems.length===0"
-         class="py-24 text-center text-slate-300 dark:text-slate-600">
-      <div class="text-5xl mb-3">📦</div>
-      <p class="text-sm">{{ t('browse.no_complexes') }}</p>
-      <a href="/complex/new" class="mt-3 inline-block px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
-        + {{ t('complex.new') }}
-      </a>
-    </div>
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      <template x-for="c in mineItems" :key="c.id">
-        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700
-                    shadow-sm hover:shadow-md transition-shadow p-4 flex flex-col gap-2">
-          <div class="flex items-start justify-between gap-2">
-            <h3 class="font-semibold text-slate-800 dark:text-slate-100 truncate flex-1" x-text="c.name"></h3>
-            <span :class="c.visibility==='public' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'"
-                  class="chip shrink-0" x-text="c.visibility"></span>
-          </div>
-          <div class="flex items-center gap-3 text-xs text-slate-400 dark:text-slate-500">
-            <span x-show="c.total_workers > 0" x-text="'👷 ' + c.total_workers"></span>
-            <span x-show="c.total_electricity_kw" class="text-orange-400"
-                  x-text="'⚡ ' + Math.abs(c.total_electricity_kw).toFixed(0)"></span>
-            <span x-show="c.visibility==='public'"
-                  class="flex items-center gap-0.5 text-rose-400">
-              ♥ <span x-text="c.likes_count"></span>
-            </span>
-            <span x-show="c.forked_from_id" class="text-slate-300 dark:text-slate-600">{{ t('complex.forked_from') }}</span>
-          </div>
-          <div class="flex items-center gap-2 mt-auto pt-2 border-t border-slate-100 dark:border-slate-700">
-            <a :href="'/complex/' + c.id + '/edit'"
-               class="flex-1 text-center text-xs px-2 py-1.5 bg-blue-50 dark:bg-blue-900/30
-                      text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors">
-              ✏️ Edit
-            </a>
-            <button @click="toggleVisibility(c)"
-                    :class="c.visibility==='public' ? 'bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'"
-                    class="flex-1 text-xs px-2 py-1.5 rounded-lg hover:opacity-80 transition-colors"
-                    x-text="c.visibility==='public' ? '🔒 ' + jt('complex.unpublish') : '🌐 ' + jt('complex.publish')">
-            </button>
-            <button @click="deleteComplex(c)"
-                    class="text-xs px-2 py-1.5 text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
-              🗑
-            </button>
-          </div>
-        </div>
-      </template>
-    </div>
-  </div>
-  {% endif %}
-
 
   <!-- ─── COMMUNITY TAB ─── -->
   <div x-show="tab==='community'">
@@ -545,74 +610,353 @@
       <div class="flex rounded-lg border border-slate-200 dark:border-slate-600 text-sm overflow-hidden">
         <button @click="communitySort='new'; communityPage=1; loadCommunity()"
                 :class="communitySort==='new' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600'"
-                class="px-3 py-1.5 transition-colors">🕐 New</button>
+                class="px-3 py-1.5 transition-colors" x-text="'🕐 ' + jt('community.sort_new')"></button>
         <button @click="communitySort='popular'; communityPage=1; loadCommunity()"
                 :class="communitySort==='popular' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600'"
-                class="px-3 py-1.5 transition-colors border-l border-slate-200 dark:border-slate-600">♥ Popular</button>
+                class="px-3 py-1.5 transition-colors border-l border-slate-200 dark:border-slate-600" x-text="'♥ ' + jt('community.sort_popular')"></button>
       </div>
-      <span class="text-xs text-slate-400 dark:text-slate-500" x-text="communityTotal + ' complexes'"></span>
+      <span class="text-xs text-slate-400 dark:text-slate-500" x-text="jt('community.total', {n: communityTotal})"></span>
+      <button @click="loadCommunity()"
+              class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 dark:text-slate-500
+                     hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              :title="jt('browse.refresh')">
+        <svg viewBox="0 0 20 20" fill="none" class="w-4 h-4">
+          <path d="M17 3v4h-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M3 10a7 7 0 0112.4-4.4L17 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M3 17v-4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M17 10a7 7 0 01-12.4 4.4L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
     </div>
 
     <div x-show="communityLoading" class="flex items-center justify-center py-24 text-slate-400 dark:text-slate-500">
-      <div class="text-4xl animate-spin mr-3">⚙</div> Loading…
+      <div class="text-4xl animate-spin mr-3">⚙</div> <span x-text="jt('browse.loading')"></span>
     </div>
     <div x-show="!communityLoading && communityItems.length===0"
          class="py-24 text-center text-slate-300 dark:text-slate-600">
       <div class="text-5xl mb-3">🌐</div>
-      <p class="text-sm">No public complexes yet. Be the first!</p>
+      <p class="text-sm" x-text="jt('community.empty')"></p>
     </div>
 
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      <template x-for="c in communityItems" :key="c.id">
-        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700
-                    shadow-sm hover:shadow-md transition-shadow p-4 flex flex-col gap-3">
-          <!-- Author -->
-          <div class="flex items-center gap-2">
-            <div x-show="c.author_avatar">
-              <img :src="c.author_avatar" class="w-6 h-6 rounded-full object-cover">
-            </div>
-            <div x-show="!c.author_avatar"
-                 class="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-600 flex items-center justify-center text-xs">
-              👤
-            </div>
-            <span class="text-xs text-slate-500 dark:text-slate-400 truncate" x-text="c.author || 'Anonymous'"></span>
-            <span x-show="c.forked_from_id" class="ml-auto chip bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500">
-              fork
-            </span>
-          </div>
-          <!-- Name -->
-          <h3 class="font-semibold text-slate-800 dark:text-slate-100 leading-tight" x-text="c.name"></h3>
-          <!-- Stats -->
-          <div class="flex items-center gap-3 text-xs text-slate-400 dark:text-slate-500">
-            <span x-show="c.total_workers > 0" x-text="'👷 ' + c.total_workers"></span>
-            <span x-show="c.total_electricity_kw" class="text-orange-400"
-                  x-text="'⚡ ' + Math.abs(c.total_electricity_kw).toFixed(0) + ' kW'"></span>
-            <span class="ml-auto flex items-center gap-0.5 text-rose-400">
-              ♥ <span x-text="c.likes_count"></span>
-            </span>
-          </div>
-          <!-- Actions -->
-          <div class="flex gap-2 mt-auto pt-2 border-t border-slate-100 dark:border-slate-700">
-            <a :href="'/complex/' + c.id + '/view'"
-               class="flex-1 text-center text-xs px-2 py-1.5 bg-slate-50 dark:bg-slate-700
-                      text-slate-600 dark:text-slate-300 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors">
-              👁 View
-            </a>
-            {% if user %}
-            <button @click="forkComplex(c)"
-                    class="flex-1 text-xs px-2 py-1.5 bg-blue-50 dark:bg-blue-900/30
-                           text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 transition-colors">
-              {{ t('complex.fork') }}
-            </button>
-            <button @click="likeComplex(c)"
-                    :class="c._liked ? 'text-rose-500 bg-rose-50 dark:bg-rose-900/30' : 'text-slate-400 dark:text-slate-500 hover:text-rose-400'"
-                    class="text-xs px-2 py-1.5 rounded-lg transition-colors">
-              ♥
-            </button>
-            {% endif %}
-          </div>
-        </div>
-      </template>
+    <!-- Community table -->
+    <div x-show="!communityLoading && communityItems.length > 0"
+         class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-x-auto">
+      <table class="w-full text-sm border-collapse">
+        <thead>
+          <tr class="bg-slate-50 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400
+                     text-left text-xs uppercase tracking-wide border-b border-slate-200 dark:border-slate-700">
+            <th class="px-2 py-2.5 w-6"></th>
+            <th class="px-4 py-2.5 min-w-48">{{ t('community.col_name') }}</th>
+            <th class="px-4 py-2.5 text-right w-12">👷</th>
+            <th class="px-4 py-2.5 text-right w-16">⚡ kW</th>
+            <th class="px-4 py-2.5 w-32">{{ t('browse.col_maint') }}</th>
+            <th class="px-4 py-2.5 w-36">{{ t('browse.col_inputs') }}</th>
+            <th class="px-4 py-2.5 w-36">{{ t('browse.col_outputs') }}</th>
+            <th class="px-3 py-2.5 text-right w-14" title="{{ t('community.forks_hint') }}">
+              <svg viewBox="0 0 20 20" fill="none" class="w-3.5 h-3.5 inline text-slate-400 dark:text-slate-500">
+                <polyline points="7,9 10,13 13,9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <line x1="10" y1="3" x2="10" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <path d="M4 16h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </th>
+            <th class="px-3 py-2.5 w-20 text-right">{{ t('community.date') }}</th>
+            <th class="px-3 py-2.5 w-40"></th>
+          </tr>
+        </thead>
+        <template x-for="(c, i) in communityItems" :key="c.id">
+          <tbody :class="i%2===0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/60 dark:bg-slate-700/20'">
+
+            <!-- Main row -->
+            <tr @click="toggleCommunity(c)"
+                class="border-b border-slate-100 dark:border-slate-700 cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/20">
+
+              <!-- Toggle arrow -->
+              <td class="px-2 py-2 text-slate-400 dark:text-slate-500 select-none">
+                <svg viewBox="0 0 8 8" fill="currentColor" class="w-2 h-2 transition-transform duration-150" :class="c._open ? 'rotate-90' : ''">
+                  <polygon points="1,0.5 7.5,4 1,7.5"/>
+                </svg>
+              </td>
+
+              <!-- Name + author -->
+              <td class="px-4 py-2.5">
+                <div class="flex items-center gap-2">
+                  <span class="chip bg-violet-100 text-violet-700 shrink-0" x-html="_ICON_COMPLEX"></span>
+                  <div class="min-w-0">
+                    <span class="font-medium text-slate-800 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 transition-colors block truncate"
+                          x-text="c.name"></span>
+                    <div class="flex items-center gap-1 mt-0.5">
+                      <img x-show="c.author_avatar" :src="c.author_avatar" class="w-3.5 h-3.5 rounded-full object-cover">
+                      <span x-show="!c.author_avatar" class="text-slate-300 dark:text-slate-600 text-xs">👤</span>
+                      <span class="text-xs text-slate-400 dark:text-slate-500 truncate cursor-pointer hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
+                            x-text="c.author || 'Anonymous'"
+                            @click.stop="if(c.author){communityQ='by:&quot;'+c.author+'&quot;'; communityPage=1; loadCommunity()}"
+                            :title="c.author ? 'by:&quot;'+c.author+'&quot;' : ''"></span>
+                      <a x-show="c.forked_from_id && c.forked_from_slug"
+                         :href="'/complex/' + c.forked_from_slug + '/view'"
+                         target="_blank"
+                         @click.stop
+                         class="chip bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 text-xs hover:text-blue-500 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors">
+                        {{ t('complex.forked_from') }}
+                      </a>
+                      <span x-show="c.forked_from_id && !c.forked_from_slug"
+                            class="chip bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500 text-xs">
+                        {{ t('complex.forked_from') }}
+                      </span>
+                    </div>
+                    <!-- Tags -->
+                    <div x-show="c.tags && c.tags.length" class="flex items-center gap-1 flex-wrap mt-1">
+                      <template x-for="tag in (c.tags || [])" :key="tag">
+                        <button @click.stop="communityQ='tag:'+tag; communityPage=1; loadCommunity()"
+                                class="text-xs px-1.5 py-0.5 rounded-full
+                                       bg-blue-50 dark:bg-blue-900/30 text-blue-500 dark:text-blue-400
+                                       border border-blue-200 dark:border-blue-700
+                                       hover:bg-blue-100 dark:hover:bg-blue-800/50 transition-colors"
+                                :title="jt('tags.search_hint')">#<span x-text="tag"></span></button>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </td>
+
+              <!-- Workers -->
+              <td class="px-4 py-2 text-right text-slate-500 dark:text-slate-400 tabular-nums">
+                <span x-show="c.total_workers > 0" x-text="c.total_workers"></span>
+                <span x-show="!(c.total_workers > 0)" class="text-slate-200 dark:text-slate-600">—</span>
+              </td>
+
+              <!-- Electricity -->
+              <td class="px-4 py-2 text-right tabular-nums">
+                <span x-show="!c.total_electricity_kw" class="text-slate-200 dark:text-slate-600">—</span>
+                <span x-show="c.total_electricity_kw < 0" class="text-emerald-600 font-medium"
+                      x-text="Math.abs(c.total_electricity_kw).toFixed(0)"></span>
+                <span x-show="c.total_electricity_kw > 0" class="text-orange-500"
+                      x-text="c.total_electricity_kw.toFixed(0)"></span>
+              </td>
+
+              <!-- Maintenance (icons only) -->
+              <td class="px-4 py-2">
+                <div class="flex flex-col gap-0.5">
+                  <template x-for="m in (c.maintenance||[])" :key="m.item">
+                    <span class="inline-flex items-center gap-1">
+                      <span class="item-icon" :title="m.item">
+                        <img :src="iconOf(m.item_en||m.item)" @error="$el.parentElement.classList.add('no-img')" loading="lazy">
+                        <span class="item-label chip bg-amber-50 text-amber-700 border border-amber-100" x-text="m.item"></span>
+                      </span>
+                      <span class="text-xs tabular-nums text-slate-500 dark:text-slate-400 font-medium" x-text="m.rate_per_min"></span>
+                    </span>
+                  </template>
+                  <span x-show="!(c.maintenance||[]).length" class="text-slate-200 dark:text-slate-600 text-xs">—</span>
+                </div>
+              </td>
+
+              <!-- Inputs (icons + qty) -->
+              <td class="px-4 py-2">
+                <div class="flex flex-wrap gap-x-2 gap-y-1">
+                  <template x-for="f in (c.inputs||[])" :key="f.item">
+                    <span class="inline-flex items-center gap-0.5 cursor-pointer hover:opacity-70 transition-opacity"
+                          @click.stop="communityQ='&quot;'+f.item+'&quot;'; communityPage=1; loadCommunity()">
+                      <span class="item-icon" :title="f.item">
+                        <img :src="iconOf(f.item_en||f.item)" @error="$el.parentElement.classList.add('no-img')" loading="lazy">
+                        <span class="item-label chip bg-red-50 text-red-700 border border-red-100" x-text="f.item"></span>
+                      </span>
+                      <span class="text-xs tabular-nums text-slate-500 dark:text-slate-400 font-medium"
+                            x-text="f.qty_per_min"></span>
+                    </span>
+                  </template>
+                  <span x-show="!(c.inputs||[]).length" class="text-slate-200 dark:text-slate-600 text-xs">—</span>
+                </div>
+              </td>
+
+              <!-- Outputs (icons + qty) -->
+              <td class="px-4 py-2">
+                <div class="flex flex-wrap gap-x-2 gap-y-1">
+                  <template x-for="f in (c.outputs||[])" :key="f.item">
+                    <span class="inline-flex items-center gap-0.5 cursor-pointer hover:opacity-70 transition-opacity"
+                          @click.stop="communityQ='&quot;'+f.item+'&quot;'; communityPage=1; loadCommunity()">
+                      <span class="item-icon" :title="f.item">
+                        <img :src="iconOf(f.item_en||f.item)" @error="$el.parentElement.classList.add('no-img')" loading="lazy">
+                        <span class="item-label chip bg-emerald-50 text-emerald-700 border border-emerald-100" x-text="f.item"></span>
+                      </span>
+                      <span class="text-xs tabular-nums text-slate-500 dark:text-slate-400 font-medium"
+                            x-text="f.qty_per_min"></span>
+                    </span>
+                  </template>
+                  <span x-show="!(c.outputs||[]).length" class="text-slate-200 dark:text-slate-600 text-xs">—</span>
+                </div>
+              </td>
+
+              <!-- Forks -->
+              <td class="px-3 py-2 text-right text-slate-400 dark:text-slate-500 tabular-nums"
+                  x-text="c.fork_count || 0"></td>
+
+              <!-- Date -->
+              <td class="px-3 py-2 text-right text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap"
+                  x-text="relativeTime(c.updated_at)"></td>
+
+              <!-- Actions -->
+              <td class="px-3 py-2 text-center whitespace-nowrap" @click.stop>
+                {% if user %}
+                <!-- Own complex → edit + like count (read-only); others → view + download-copy + like button -->
+                <template x-if="window._coiUser && c.user_id === window._coiUser.id">
+                  <span class="inline-flex items-center gap-1.5">
+                    <a :href="'/complex/' + c.slug + '/edit?back=' + encodeURIComponent(location.href)"
+                       class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
+                       :title="'{{ t('complex.edit') }}'">
+                      <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
+                        <path d="M13.5 3.5l3 3L7 16H4v-3L13.5 3.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                        <line x1="11" y1="6" x2="14" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                      </svg>
+                    </a>
+                    <button @click="likeComplex(c)"
+                            :class="c._liked ? 'text-rose-500 opacity-100' : 'text-slate-500 dark:text-slate-400 opacity-60 hover:opacity-100 hover:text-rose-500'"
+                            class="inline-flex items-center h-6 gap-0.5 text-sm tabular-nums hover:scale-110 transition-all"
+                            :title="c._liked ? 'Unlike' : 'Like'">
+                      ♥<span x-text="c.likes_count||0"></span>
+                    </button>
+                  </span>
+                </template>
+                <template x-if="!window._coiUser || c.user_id !== window._coiUser.id">
+                  <span class="inline-flex items-center gap-1.5">
+                    <a :href="'/complex/' + c.slug + '/view?back=' + encodeURIComponent(location.href)"
+                       class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
+                       :title="jt('community.view')">
+                      <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
+                        <path d="M9 4H4a1 1 0 00-1 1v11a1 1 0 001 1h11a1 1 0 001-1v-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        <polyline points="13,3 17,3 17,7" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+                        <line x1="10.5" y1="9.5" x2="17" y2="3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                      </svg>
+                    </a>
+                    <!-- Подписка (закладка) — только для авторизованных, не для своих -->
+                    <button @click="toggleSubscribe(c)"
+                            :class="c._subscribed ? 'text-rose-500 opacity-100' : 'text-slate-500 dark:text-slate-400 opacity-60 hover:opacity-100 hover:text-rose-500'"
+                            class="inline-flex items-center justify-center w-6 h-6 hover:scale-110 transition-all"
+                            :title="c._subscribed ? jt('subscriptions.unsubscribe') : (window._coiUser && !window._coiUser.is_guest ? jt('subscriptions.subscribe') : jt('subscriptions.login_required'))">
+                      <svg viewBox="0 0 20 20" :fill="c._subscribed ? 'currentColor' : 'none'" class="w-4 h-4">
+                        <path d="M5 3a1 1 0 011-1h8a1 1 0 011 1v13l-5-2.5L5 16V3z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                    </button>
+                    <button @click="forkComplex(c)"
+                            class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
+                            :title="'{{ t('complex.fork') }}'">
+                      <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
+                        <rect x="7" y="7" width="9.5" height="10.5" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                        <path d="M13 7V5.5A1.5 1.5 0 0011.5 4h-7A1.5 1.5 0 003 5.5v8A1.5 1.5 0 004.5 15H7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                    </button>
+                    <button @click="likeComplex(c)"
+                            :class="c._liked ? 'text-rose-500 opacity-100' : 'text-slate-500 dark:text-slate-400 opacity-60 hover:opacity-100 hover:text-rose-500'"
+                            class="inline-flex items-center h-6 gap-0.5 text-sm tabular-nums hover:scale-110 transition-all"
+                            :title="c._liked ? 'Unlike' : 'Like'">
+                      ♥<span x-text="c.likes_count||0"></span>
+                    </button>
+                  </span>
+                </template>
+                {% else %}
+                <span class="inline-flex items-center gap-1.5">
+                  <a :href="'/complex/' + c.slug + '/view?from=community'"
+                     class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
+                     :title="jt('community.view')">
+                    <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
+                      <path d="M9 4H4a1 1 0 00-1 1v11a1 1 0 001 1h11a1 1 0 001-1v-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                      <polyline points="13,3 17,3 17,7" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+                      <line x1="10.5" y1="9.5" x2="17" y2="3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                  </a>
+                  <span class="inline-flex items-center gap-0.5 text-slate-400 dark:text-slate-500 text-xs tabular-nums">
+                    ♥<span x-text="c.likes_count||0"></span>
+                  </span>
+                </span>
+                {% endif %}
+              </td>
+
+            </tr>
+
+            <!-- Expanded detail row -->
+            <tr x-show="c._open" class="border-b border-slate-200 dark:border-slate-700">
+              <td></td>
+              <td colspan="9" class="px-6 pt-1 pb-4">
+                <div class="grid grid-cols-1 sm:grid-cols-4 gap-5 mt-1">
+
+                  <!-- Contents -->
+                  <div>
+                    <p class="text-xs font-semibold text-violet-600 mb-1.5 uppercase tracking-wide">{{ t('browse.contents') }}</p>
+                    <div x-show="!c._members" class="text-xs text-slate-300 dark:text-slate-600">{{ t('browse.loading') }}</div>
+                    <div class="space-y-0.5">
+                      <template x-for="(m, mi) in (c._members||[])" :key="mi">
+                        <div class="flex items-center justify-between text-xs gap-2">
+                          <span class="flex items-center gap-1.5">
+                            <span class="tabular-nums font-bold text-slate-500 dark:text-slate-400 min-w-[1.5rem] text-right"
+                                  x-text="m.count+'×'"></span>
+                            <span class="text-slate-700 dark:text-slate-300" x-text="m.label"></span>
+                            <span x-show="m.efficiency < 0.999" class="text-violet-500 text-xs"
+                                  x-text="'⏸'+Math.round(m.efficiency*100)+'%'"></span>
+                          </span>
+                          <span class="shrink-0 text-slate-400 flex items-center gap-1.5">
+                            <span x-show="m.workers>0" x-text="'👷'+Math.round(m.workers*m.count)"></span>
+                            <span x-show="m.electricity_kw"
+                                  :class="m.electricity_kw<0?'text-emerald-500':'text-orange-400'"
+                                  x-text="'⚡'+Math.abs(+(m.electricity_kw*m.count*(m.efficiency||1)).toFixed(1))"></span>
+                          </span>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- Maintenance -->
+                  <div x-show="(c.maintenance||[]).length > 0">
+                    <p class="text-xs font-semibold text-amber-600 mb-1.5 uppercase tracking-wide">{{ t('browse.col_maint') }}</p>
+                    <div class="space-y-1">
+                      <template x-for="m in (c.maintenance||[])" :key="m.item">
+                        <div class="flex justify-between text-xs gap-4">
+                          <span class="flex items-center gap-1.5">
+                            <img :src="iconOf(m.item_en||m.item)" @error="$el.style.display='none'" class="w-4 h-4 object-contain shrink-0" loading="lazy">
+                            <span x-text="m.item" class="dark:text-slate-300"></span>
+                          </span>
+                          <span class="tabular-nums shrink-0 text-slate-400" x-text="m.rate_per_min+jt('editor.per_min')"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- Inputs detail -->
+                  <div x-show="(c.inputs||[]).length > 0">
+                    <p class="text-xs font-semibold text-red-600 mb-1.5 uppercase tracking-wide">{{ t('browse.col_inputs') }}</p>
+                    <div class="space-y-1">
+                      <template x-for="f in (c.inputs||[])" :key="f.item">
+                        <div class="flex justify-between text-xs gap-4">
+                          <span class="flex items-center gap-1.5">
+                            <img :src="iconOf(f.item_en||f.item)" @error="$el.style.display='none'" class="w-4 h-4 object-contain shrink-0" loading="lazy">
+                            <span x-text="f.item" class="dark:text-slate-300"></span>
+                          </span>
+                          <span class="tabular-nums shrink-0 text-slate-400" x-text="f.qty_per_min+jt('editor.per_min')"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- Outputs detail -->
+                  <div x-show="(c.outputs||[]).length > 0">
+                    <p class="text-xs font-semibold text-emerald-600 mb-1.5 uppercase tracking-wide">{{ t('browse.col_outputs') }}</p>
+                    <div class="space-y-1">
+                      <template x-for="f in (c.outputs||[])" :key="f.item">
+                        <div class="flex justify-between text-xs gap-4">
+                          <span class="flex items-center gap-1.5">
+                            <img :src="iconOf(f.item_en||f.item)" @error="$el.style.display='none'" class="w-4 h-4 object-contain shrink-0" loading="lazy">
+                            <span x-text="f.item" class="dark:text-slate-300"></span>
+                          </span>
+                          <span class="tabular-nums shrink-0 text-slate-400" x-text="f.qty_per_min+jt('editor.per_min')"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+
+                </div>
+              </td>
+            </tr>
+
+          </tbody>
+        </template>
+      </table>
     </div>
 
     <!-- Community pagination -->
@@ -648,12 +992,21 @@
             flex items-center gap-3 px-5 py-3 text-sm">
   <span class="font-medium text-slate-300" x-text="'{{ t('browse.selected') }}: ' + selected.size"></span>
   <button @click="batchHide(true)"
-          class="bg-slate-600 hover:bg-amber-600 transition-colors px-3 py-1.5 rounded-lg font-medium">
-    🙈 {{ t('browse.hide') }}
+          class="bg-slate-600 hover:bg-amber-600 transition-colors px-3 py-1.5 rounded-lg font-medium inline-flex items-center gap-1.5">
+    <svg viewBox="0 0 20 20" fill="none" class="w-4 h-4 shrink-0">
+      <ellipse cx="10" cy="10" rx="7.5" ry="5" stroke="currentColor" stroke-width="1.5"/>
+      <circle cx="10" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+      <line x1="3" y1="3" x2="17" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+    {{ t('browse.hide') }}
   </button>
   <button @click="batchHide(false)"
-          class="bg-slate-600 hover:bg-emerald-600 transition-colors px-3 py-1.5 rounded-lg font-medium">
-    👁 {{ t('browse.show') }}
+          class="bg-slate-600 hover:bg-emerald-600 transition-colors px-3 py-1.5 rounded-lg font-medium inline-flex items-center gap-1.5">
+    <svg viewBox="0 0 20 20" fill="none" class="w-4 h-4 shrink-0">
+      <ellipse cx="10" cy="10" rx="7.5" ry="5" stroke="currentColor" stroke-width="1.5"/>
+      <circle cx="10" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+    </svg>
+    {{ t('browse.show') }}
   </button>
   <!-- Удалить — только когда все выбранные комплексы -->
   <button x-show="allSelectedAreComplexes"
@@ -682,7 +1035,7 @@
     <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">
       <span x-text="confirmDelete?.ids.length === 1 ? '{{ t('browse.delete_one') }}' : '{{ t('browse.delete_many') }}'"></span>
     </h2>
-    <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">
+    <p class="text-sm text-slate-500 dark:text-slate-400 mb-3">
       <template x-if="confirmDelete?.ids.length === 1">
         <span>{{ t('browse.delete_confirm_one') }} <b class="text-slate-700 dark:text-slate-200" x-text="'«' + confirmDelete.names[0] + '»'"></b>.</span>
       </template>
@@ -690,17 +1043,42 @@
         <span>{{ t('browse.delete_confirm_many') }}: <b class="text-slate-700 dark:text-slate-200" x-text="confirmDelete.ids.length"></b>.</span>
       </template>
     </p>
-    <div class="flex gap-3 justify-end">
+
+    <!-- Cascade warning: other complexes depend on this one -->
+    <template x-if="confirmDelete?.parents?.length > 0">
+      <div class="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg">
+        <p class="text-sm text-amber-800 dark:text-amber-300 mb-2"
+           x-text="jt('cascade.delete_deps_warning', {n: confirmDelete.parents.length})"></p>
+        <ul class="text-sm text-amber-700 dark:text-amber-400 space-y-0.5 max-h-32 overflow-y-auto">
+          <template x-for="p in confirmDelete.parents" :key="p.id">
+            <li x-text="'• ' + p.name"></li>
+          </template>
+        </ul>
+      </div>
+    </template>
+
+    <div class="flex gap-3 justify-end flex-wrap">
       <button @click="confirmDelete = null"
               class="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600
                      text-sm font-medium text-slate-700 dark:text-slate-300 transition-colors">
         {{ t('browse.cancel') }}
       </button>
-      <button @click="doDelete()"
-              class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700
-                     text-white text-sm font-medium transition-colors">
-        {{ t('browse.delete_forever') }}
-      </button>
+      <!-- With dependents: only cascade delete -->
+      <template x-if="confirmDelete?.parents?.length > 0">
+        <button @click="doDeleteCascade()"
+                class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700
+                       text-white text-sm font-medium transition-colors">
+          {{ t('cascade.delete_chain') }}
+        </button>
+      </template>
+      <!-- Without dependents: normal delete -->
+      <template x-if="!confirmDelete?.parents?.length">
+        <button @click="doDelete()"
+                class="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700
+                       text-white text-sm font-medium transition-colors">
+          {{ t('browse.delete_forever') }}
+        </button>
+      </template>
     </div>
   </div>
 </div>
@@ -839,10 +1217,6 @@ function app() {
     communityQ:       '',
     communityLoading: false,
 
-    /* ── Mine tab state ───────────────────────────────────────────── */
-    mineItems:   [],
-    mineLoading: false,
-
     /* ── Delete confirm ─────────────────────────────────────────── */
     confirmDelete: null,  // { ids: [...], names: [...] } | null
 
@@ -854,20 +1228,58 @@ function app() {
     emailError:  '',
     emailLoading: false,
 
+    /* ── URL state sync ─────────────────────────────────────────────── */
+    syncUrl() {
+      const p = new URLSearchParams();
+      p.set('tab', this.tab);
+      if (this.tab === 'browse') {
+        if (this.q)                  p.set('q',    this.q.trim());
+        if (this.type !== 'all')     p.set('type', this.type);
+        if (this.showHidden)         p.set('hidden', '1');
+        if (this.page > 1)           p.set('page', this.page);
+        if (this.sortKey)            p.set('sort', this.sortKey);
+        if (this.sortKey && this.sortDir !== 'asc') p.set('dir', this.sortDir);
+      } else if (this.tab === 'community') {
+        if (this.communityQ)                  p.set('cq',    this.communityQ.trim());
+        if (this.communitySort !== 'new')     p.set('csort', this.communitySort);
+        if (this.communityPage > 1)           p.set('cpage', this.communityPage);
+      }
+      const str = p.toString();
+      window.history.replaceState({}, '', str ? '?' + str : window.location.pathname);
+    },
+
     /* ── Init ──────────────────────────────────────────────────────── */
     async init() {
-      // Автоматически открыть модал авторизации если пришли с ?login=1
-      if (new URLSearchParams(window.location.search).has('login')) {
-        this.openAuth();
-        window.history.replaceState({}, '', window.location.pathname);
-      }
+      const params = new URLSearchParams(window.location.search);
+
+      // Восстановить вкладку
+      const tabParam = params.get('tab');
+      if (tabParam && ['browse', 'community'].includes(tabParam)) this.tab = tabParam;
+
+      // Восстановить состояние Browse
+      if (params.get('q'))           this.q          = params.get('q');
+      if (params.get('type'))        this.type       = params.get('type');
+      if (params.get('hidden'))      this.showHidden = true;
+      if (params.get('page'))        this.page       = Math.max(1, parseInt(params.get('page')));
+      if (params.get('sort'))        this.sortKey    = params.get('sort');
+      if (params.get('dir'))         this.sortDir    = params.get('dir');
+
+      // Восстановить состояние Community
+      if (params.get('cq'))          this.communityQ    = params.get('cq');
+      if (params.get('csort'))       this.communitySort = params.get('csort');
+      if (params.get('cpage'))       this.communityPage = Math.max(1, parseInt(params.get('cpage')));
+
+      // Открыть модал авторизации если ?login=1
+      if (params.has('login')) this.openAuth();
+
       await this.loadBrowse();
+      if (this.tab === 'community') this.loadCommunity();
     },
 
     setTab(t) {
       this.tab = t;
+      this.syncUrl();
       if (t === 'community' && this.communityItems.length === 0) this.loadCommunity();
-      if (t === 'mine'      && this.mineItems.length      === 0) this.loadMine();
     },
 
     /* ── Theme / Language ──────────────────────────────────────────── */
@@ -893,6 +1305,7 @@ function app() {
         type:     this.type,
         hidden:   this.showHidden ? 'true' : 'false',
         ...(this.q ? {q: this.q.trim()} : {}),
+        ...(this.sortKey ? {sort: this.sortKey, dir: this.sortDir} : {}),
       });
       try {
         const r = await fetch('/api/nodes?' + p);
@@ -902,6 +1315,7 @@ function app() {
         this.total = data.total;
         this.page  = data.page;
         this.pages = data.pages;
+        this.syncUrl();
       } catch(e) {
         this.browseError = 'Load error: ' + e.message;
       } finally {
@@ -916,7 +1330,7 @@ function app() {
     },
     clickNodeName(node) {
       if (node.node_type === 'complex') {
-        window.location.href = '/complex/' + node.slug + '/edit';
+        window.location.href = '/complex/' + node.slug + '/edit?back=' + encodeURIComponent(location.href);
       } else {
         this.searchExact(node.machine_name ?? node.name);
       }
@@ -931,31 +1345,12 @@ function app() {
     sortBy(key) {
       if (this.sortKey === key) { this.sortDir = this.sortDir==='asc'?'desc':'asc'; }
       else { this.sortKey = key; this.sortDir = 'asc'; }
+      this.page = 1;
+      this.loadBrowse();
     },
     sortIcon(key) { return this.sortKey!==key ? '⇅' : this.sortDir==='asc' ? '▲' : '▼'; },
 
-    get sorted() {
-      const rows = [...this.nodes];
-      if (!this.sortKey) return rows;
-      const dir = this.sortDir==='asc' ? 1 : -1;
-      const num = v => (v==null||v<0) ? 0 : v;
-      const mntPri = m => {
-        if (!m||!m.length) return 0;
-        const tier = s => { const x=s.match(/(\d+)$/); return x?+x[1]:1; };
-        const top = m.reduce((a,b)=>tier(b.item)>tier(a.item)?b:a);
-        return tier(top.item)*100000+top.rate_per_min;
-      };
-      rows.sort((a,b) => {
-        if (this.sortKey==='name')
-          return dir*(a.machine_name??a.name??'').localeCompare(b.machine_name??b.name??'','en');
-        let va,vb;
-        if (this.sortKey==='workers')        { va=num(a.workers);      vb=num(b.workers); }
-        else if (this.sortKey==='electricity'){ va=num(Math.abs(a.electricity_kw||0)); vb=num(Math.abs(b.electricity_kw||0)); }
-        else if (this.sortKey==='maintenance'){ va=mntPri(a.maintenance); vb=mntPri(b.maintenance); }
-        return va<vb?-dir:va>vb?dir:0;
-      });
-      return rows;
-    },
+    get sorted() { return this.nodes; },
 
     // ── Expand rows ────────────────────────────────────────────────
     async toggle(n) {
@@ -966,8 +1361,9 @@ function app() {
       if (open && n.node_type==='complex' && !this.nodes[idx]._members) {
         try {
           const r = await fetch(`/api/complex/${n.node_id}/members`);
-          if (r.ok) this.nodes[idx] = {...this.nodes[idx], _members: await r.json()};
-        } catch(_) {}
+          const members = r.ok ? await r.json() : [];
+          this.nodes[idx] = {...this.nodes[idx], _members: members};
+        } catch(_) { this.nodes[idx] = {...this.nodes[idx], _members: []}; }
       }
       this.nodes = [...this.nodes];
     },
@@ -991,10 +1387,19 @@ function app() {
     },
 
     // ── Delete ────────────────────────────────────────────────────
-    askDelete(node) {
+    async askDelete(node) {
+      let parents = [];
+      try {
+        const r = await fetch(`/api/complex/${node.node_id}/cascade-info`);
+        if (r.ok) {
+          const d = await r.json();
+          parents = d.all_parents || [];
+        }
+      } catch(e) {}
       this.confirmDelete = {
-        ids:   [node.node_id],
-        names: [node.name ?? node.machine_name ?? String(node.node_id)],
+        ids:     [node.node_id],
+        names:   [node.name ?? node.machine_name ?? String(node.node_id)],
+        parents,
       };
     },
 
@@ -1004,24 +1409,38 @@ function app() {
         const node = this.nodes.find(n => n.node_type === 'complex' && n.node_id === id);
         return { id, name: node?.name ?? node?.machine_name ?? String(id) };
       });
-      this.confirmDelete = { ids: list.map(x=>x.id), names: list.map(x=>x.name) };
+      this.confirmDelete = { ids: list.map(x=>x.id), names: list.map(x=>x.name), parents: [] };
+    },
+
+    async _deleteIds(ids) {
+      const results = await Promise.all(
+        ids.map(id => fetch(`/api/complex/${id}`, { method: 'DELETE' }))
+      );
+      const failed = results.filter(r => !r.ok);
+      if (failed.length) throw new Error(`Failed to delete ${failed.length} complex(es)`);
+      const idSet = new Set(ids);
+      this.nodes = this.nodes.filter(n => !(n.node_type==='complex' && idSet.has(n.node_id)));
+      for (const id of ids) this.selected.delete('complex:' + id);
+      this.selected = new Set(this.selected);
     },
 
     async doDelete() {
       if (!this.confirmDelete) return;
       const { ids } = this.confirmDelete;
       this.confirmDelete = null;
-      try {
-        const results = await Promise.all(
-          ids.map(id => fetch(`/api/complex/${id}`, { method: 'DELETE' }))
-        );
-        const failed = results.filter(r => !r.ok);
-        if (failed.length) throw new Error(`Failed to delete ${failed.length} complex(es)`);
-        const idSet = new Set(ids);
-        this.nodes = this.nodes.filter(n => !(n.node_type==='complex' && idSet.has(n.node_id)));
-        for (const id of ids) this.selected.delete('complex:' + id);
-        this.selected = new Set(this.selected);
-      } catch(e) { alert('Error: ' + e.message); }
+      try { await this._deleteIds(ids); }
+      catch(e) { alert('Error: ' + e.message); }
+    },
+
+    async doDeleteCascade() {
+      if (!this.confirmDelete) return;
+      const allIds = [
+        ...this.confirmDelete.ids,
+        ...(this.confirmDelete.parents || []).map(p => p.id),
+      ];
+      this.confirmDelete = null;
+      try { await this._deleteIds(allIds); }
+      catch(e) { alert('Error: ' + e.message); }
     },
 
     // ── Hidden toggles (всегда через API, g.user существует для всех посетителей) ──
@@ -1034,7 +1453,14 @@ function app() {
         });
         if (!r.ok) { const d=await r.json(); if(d.error==='login_required'){this.openAuth();return;} throw new Error(d.error||'error'); }
         const idx = this.nodes.findIndex(n=>n.node_type===node.node_type&&n.node_id===node.node_id);
-        if (idx!==-1) { this.nodes[idx]={...this.nodes[idx],deprecated:newVal}; this.nodes=[...this.nodes]; }
+        if (idx !== -1) {
+          if (newVal && !this.showHidden) {
+            this.nodes = this.nodes.filter((_, i) => i !== idx);
+          } else {
+            this.nodes[idx] = {...this.nodes[idx], deprecated: newVal};
+            this.nodes = [...this.nodes];
+          }
+        }
       } catch(e) { alert('Error: '+e.message); }
     },
 
@@ -1047,7 +1473,11 @@ function app() {
         });
         if (!r.ok) throw new Error(await r.text());
         const ks = this.selected;
-        this.nodes = this.nodes.map(n=>ks.has(this.key(n))?{...n,deprecated:hidden}:n);
+        if (hidden && !this.showHidden) {
+          this.nodes = this.nodes.filter(n => !ks.has(this.key(n)));
+        } else {
+          this.nodes = this.nodes.map(n => ks.has(this.key(n)) ? {...n, deprecated: hidden} : n);
+        }
         this.clearSelection();
       } catch(e) { alert('Error: '+e.message); }
     },
@@ -1065,11 +1495,26 @@ function app() {
         const r = await fetch('/api/complexes/public?'+p);
         if (!r.ok) throw new Error('HTTP '+r.status);
         const data = await r.json();
-        this.communityItems = data.items;
+        this.communityItems = data.items.map(x => ({...x, _open: false}));
         this.communityTotal = data.total;
         this.communityPages = data.pages;
+        this.syncUrl();
       } catch(e) {}
       finally { this.communityLoading = false; }
+    },
+
+    async toggleCommunity(c) {
+      const newOpen = !c._open;
+      this.communityItems = this.communityItems.map(x => x.id===c.id ? {...x, _open: newOpen} : x);
+      if (newOpen && !c._members) {
+        try {
+          const r = await fetch(`/api/complex/${c.id}/members`);
+          const members = r.ok ? await r.json() : [];
+          this.communityItems = this.communityItems.map(x => x.id===c.id ? {...x, _members: members} : x);
+        } catch(_) {
+          this.communityItems = this.communityItems.map(x => x.id===c.id ? {...x, _members: []} : x);
+        }
+      }
     },
 
     async forkComplex(c) {
@@ -1081,7 +1526,19 @@ function app() {
           if (d.error==='limit_reached')  { alert(jt('complex.limit_reached',{n:d.limit})); return; }
           throw new Error(d.error||'error');
         }
-        alert('Forked! You can find it in My Complexes.');
+        if (confirm(jt('community.fork_success'))) window.location.href = '/complex/' + d.slug + '/edit';
+      } catch(e) { alert('Error: '+e.message); }
+    },
+
+    async forkOwnComplex(c) {
+      try {
+        const r = await fetch(`/api/complex/${c.id}/fork`, {method:'POST'});
+        const d = await r.json();
+        if (!r.ok) {
+          if (d.error==='limit_reached') { alert(jt('complex.limit_reached',{n:d.limit})); return; }
+          throw new Error(d.error||'error');
+        }
+        await this.loadBrowse();
       } catch(e) { alert('Error: '+e.message); }
     },
 
@@ -1096,41 +1553,31 @@ function app() {
       } catch(e) {}
     },
 
-    /* ── Mine ───────────────────────────────────────────────────── */
-    async loadMine() {
-      this.mineLoading = true;
+    /* ── Subscriptions ─────────────────────────────────────────── */
+    async toggleSubscribe(c) {
+      if (!window._coiUser || window._coiUser.is_guest) { this.openAuth(); return; }
+      const method = c._subscribed ? 'DELETE' : 'POST';
       try {
-        const r = await fetch('/api/complexes/mine');
-        if (!r.ok) { this.mineLoading = false; return; }
-        this.mineItems = await r.json();
-      } catch(e) {}
-      finally { this.mineLoading = false; }
-    },
-
-    async toggleVisibility(c) {
-      const vis = c.visibility==='public' ? 'private' : 'public';
-      try {
-        const r = await fetch(`/api/complex/${c.id}/visibility`, {
-          method:'PATCH', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({visibility: vis}),
-        });
-        const d = await r.json();
+        const r = await fetch(`/api/complex/${c.id}/subscribe`, {method});
         if (!r.ok) {
-          if (d.error==='limit_reached') { alert(jt('complex.limit_reached',{n:d.limit})); return; }
-          throw new Error(d.error||'error');
+          const d = await r.json().catch(()=>({}));
+          if (d.error === 'login_required') { this.openAuth(); return; }
+          return;
         }
-        c.visibility = vis;
-        this.mineItems = [...this.mineItems];
-      } catch(e) { alert('Error: '+e.message); }
+        c._subscribed = !c._subscribed;
+        this.communityItems = [...this.communityItems];
+      } catch(e) {}
     },
 
-    async deleteComplex(c) {
-      if (!confirm(jt('complex.delete_confirm'))) return;
+    async unsubscribeFromBrowse(node) {
+      if (!confirm(jt('subscriptions.unsubscribe_confirm'))) return;
       try {
-        const r = await fetch(`/api/complex/${c.id}`, {method:'DELETE'});
-        if (!r.ok) throw new Error('error');
-        this.mineItems = this.mineItems.filter(x=>x.id!==c.id);
-      } catch(e) { alert('Error: '+e.message); }
+        const r = await fetch(`/api/complex/${node.node_id}/subscribe`, {method:'DELETE'});
+        if (r.ok) {
+          node._subscribed = false;
+          await this.loadBrowse();
+        }
+      } catch(e) {}
     },
 
     /* ── Auth modal helpers ─────────────────────────────────────── */

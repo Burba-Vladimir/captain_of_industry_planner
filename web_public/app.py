@@ -8,10 +8,14 @@ Captain of Industry — публичная веб-версия
 """
 from __future__ import annotations
 
+import datetime as _dt
+from datetime import timedelta
 import decimal
+import functools
 import json
 import os
 import re
+import uuid as _uuid
 
 from dotenv import load_dotenv
 load_dotenv()  # загрузить .env до инициализации Flask
@@ -43,8 +47,15 @@ def _tokenize_query(q: str) -> list:
             tokens.append(('str', q[i + 1:end].lower()))
             i = end + 1
             continue
-        # Префикс in:/out:/name: (возможно с кавычками)
-        m = re.match(r'(in|out|name):\s*(?:"([^"]*)"|(\S*))', q[i:], re.IGNORECASE)
+        # Shorthand: #tagname → tag:tagname
+        if c == '#':
+            m = re.match(r'#([\w\-]{1,30})', q[i:], re.IGNORECASE | re.UNICODE)
+            if m:
+                tokens.append(('prefix', 'tag', m.group(1).lower(), True))
+                i += m.end()
+                continue
+        # Префикс in:/out:/name:/by:/tag: (возможно с кавычками)
+        m = re.match(r'(in|out|name|by|tag):\s*(?:"([^"]*)"|(\S*))', q[i:], re.IGNORECASE)
         if m:
             prefix = m.group(1).lower()
             exact  = m.group(2) is not None   # было ли значение в кавычках
@@ -68,7 +79,7 @@ def _parse_search(q: str):
     if not q:
         return None
     # Нет спецсимволов — legacy-режим
-    if not re.search(r'(?:in|out|name):|[&|(]', q, re.IGNORECASE):
+    if not re.search(r'(?:in|out|name|by|tag):|#[a-z0-9\-]|[&|(]', q, re.IGNORECASE):
         exact = q.startswith('"') and q.endswith('"') and len(q) > 2
         value = q[1:-1] if exact else q
         return ('legacy', exact, value.lower())
@@ -155,8 +166,85 @@ def _eval_search(ast, row: dict) -> bool:
             return any(match(s) for s in outputs)
         if prefix == 'name':
             return match(name)
+        if prefix == 'tag':
+            tags = [t.lower() for t in (row.get('tags') or [])]
+            return any(match(t) for t in tags)
         return any(match(s) for s in [name] + inputs + outputs)
     return True
+
+def _build_community_where(ast, params: list, trans_rev: dict) -> tuple:
+    """Рекурсивно строит SQL-фрагмент WHERE для community-поиска.
+    Возвращает (sql_fragment, needs_users_join).
+    params мутируется на месте.
+    """
+    if ast is None:
+        return "1=1", False
+
+    kind = ast[0]
+
+    if kind in ("or", "and"):
+        op = "OR" if kind == "or" else "AND"
+        l, lj = _build_community_where(ast[1], params, trans_rev)
+        r, rj = _build_community_where(ast[2], params, trans_rev)
+        return f"({l} {op} {r})", lj or rj
+
+    if kind == "legacy":
+        _, exact, value = ast
+        value_db = trans_rev.get(value, value).lower()   # RU→EN + lowercase для ресурсов
+        res_sub = ("EXISTS (SELECT 1 FROM resource_flows rf2 "
+                   "JOIN items i2 ON i2.id = rf2.item_id "
+                   "WHERE rf2.parent_type = 1 AND rf2.parent_id = c.id "
+                   "AND LOWER(i2.name) {op} %s)")
+        if exact:
+            params += [value, value_db]
+            return f"(LOWER(c.name) = %s OR {res_sub.format(op='=')})", False
+        params += [f"%{value}%", f"%{value_db}%"]
+        return f"(LOWER(c.name) LIKE %s OR {res_sub.format(op='LIKE')})", False
+
+    if kind == "match":
+        prefix = ast[1]
+        value  = ast[2]
+        exact  = ast[3] if len(ast) > 3 else False
+        if not value:
+            return "1=1", False
+
+        if prefix == "by":
+            op = "=" if exact else "LIKE"
+            v  = value if exact else f"%{value}%"
+            params.append(v)
+            return f"LOWER(u.display_name) {op} %s", True
+
+        if prefix in ("in", "out"):
+            direction = 0 if prefix == "in" else 1
+            value_db  = trans_rev.get(value, value).lower()   # RU→EN + lowercase для LOWER()
+            op = "=" if exact else "LIKE"
+            v  = value_db if exact else f"%{value_db}%"
+            params.append(v)
+            sql = (f"EXISTS (SELECT 1 FROM resource_flows rf2 "
+                   f"JOIN items i2 ON i2.id = rf2.item_id "
+                   f"WHERE rf2.parent_type = 1 AND rf2.parent_id = c.id "
+                   f"AND rf2.direction = {direction} "
+                   f"AND LOWER(i2.name) {op} %s)")
+            return sql, False
+
+        if prefix == "tag":
+            op = "=" if exact else "LIKE"
+            v  = value if exact else f"%{value}%"
+            params.append(v)
+            return (
+                "EXISTS (SELECT 1 FROM complex_tags ct "
+                "JOIN tags tg ON tg.id = ct.tag_id "
+                f"WHERE ct.complex_id = c.id AND tg.name {op} %s)"
+            ), False
+
+        # name: или None → поиск по названию комплекса
+        op = "=" if exact else "LIKE"
+        v  = value if exact else f"%{value}%"
+        params.append(v)
+        return f"LOWER(c.name) {op} %s", False
+
+    return "1=1", False
+
 
 from flask import Flask, abort, g, jsonify, redirect, render_template, request, session, url_for
 import psycopg2
@@ -169,8 +257,25 @@ from db import get_db, dict_cursor
 # ─────────────────────────────────────────────────────────────────
 # Приложение
 # ─────────────────────────────────────────────────────────────────
+
+# Flask 3.0 сериализует datetime как RFC 1123 (http_date).
+# Переопределяем провайдер, чтобы datetime → ISO 8601 (нужно для relativeTime в JS).
+from flask.json.provider import DefaultJSONProvider as _DefaultJSONProvider
+
+class _ISOJSONProvider(_DefaultJSONProvider):
+    @staticmethod
+    def default(o: object) -> object:  # type: ignore[override]
+        if isinstance(o, _dt.datetime):
+            return o.isoformat()
+        if isinstance(o, _dt.date):
+            return o.isoformat()
+        return _DefaultJSONProvider.default(o)  # type: ignore[arg-type]
+
 app = Flask(__name__)
+app.json_provider_class = _ISOJSONProvider
+app.json = _ISOJSONProvider(app)
 app.secret_key = os.environ["SECRET_KEY"]
+app.permanent_session_lifetime = timedelta(days=30)   # сессия живёт 30 дней после закрытия браузера
 
 # OAuth
 init_oauth(app)
@@ -211,6 +316,10 @@ GUEST_COOKIE_AGE  = 365 * 24 * 3600  # 1 год
 @app.before_request
 def before_request():
     _load_user_from_session()
+
+    # Постоянная сессия для залогиненных (чтобы куки не слетали при закрытии браузера)
+    if g.get("user") and not g.user.get("is_guest"):
+        session.permanent = True
 
     # Если нет session-пользователя — ищем / создаём гостевую запись по cookie
     if not g.get("user"):
@@ -455,7 +564,9 @@ SELECT * FROM (
         out.items       AS outputs,
         mnt.items       AS maintenance,
         NULL::uuid      AS slug,
-        NULL::integer   AS owner_id
+        NULL::integer   AS owner_id,
+        NULL::text      AS visibility,
+        NULL::json      AS tags
 
     FROM recipes r
     LEFT JOIN buildings b ON b.id = r.machine_id
@@ -516,7 +627,9 @@ SELECT * FROM (
         out.items                       AS outputs,
         mnt_cx.items                    AS maintenance,
         c.slug                          AS slug,
-        c.user_id                       AS owner_id
+        c.user_id                       AS owner_id,
+        c.visibility::text              AS visibility,
+        cx_tags.tags                    AS tags
 
     FROM complexes c
 
@@ -553,13 +666,24 @@ SELECT * FROM (
         WHERE cm2.complex_id = c.id
     ) mnt_cx ON TRUE
 
+    LEFT JOIN LATERAL (
+        SELECT COALESCE(json_agg(tg.name ORDER BY tg.name), '[]'::json) AS tags
+        FROM  complex_tags ct2
+        JOIN  tags tg ON tg.id = ct2.tag_id
+        WHERE ct2.complex_id = c.id
+    ) cx_tags ON TRUE
+
+    WHERE c.is_ghost = FALSE
+
 ) _nodes
 ORDER BY COALESCE(machine_name, name)
 """
 
 
+@functools.lru_cache(maxsize=8)
 def _load_content_translations(lang: str) -> dict[str, str]:
     """Возвращает {english_name: localized_name} для items и buildings.
+    Результат кешируется в памяти процесса — переводы не меняются во время работы.
     Для lang='en' возвращает пустой dict (нет необходимости в переводе).
     """
     if lang == "en":
@@ -581,6 +705,20 @@ def _load_content_translations(lang: str) -> dict[str, str]:
                 return dict(cur.fetchall())
     except Exception:
         return {}
+
+
+def _add_item_display(items: list) -> list:
+    """Добавляет item_display (перевод) не трогая item (английский канон для матчинга/сохранения)."""
+    trans = getattr(g, "content_trans", {})
+    if not trans:
+        return items
+    result = []
+    for entry in items:
+        e = dict(entry)
+        if "item" in e and e["item"] in trans:
+            e["item_display"] = trans[e["item"]]
+        result.append(e)
+    return result
 
 
 def _parse_row(row: dict) -> dict:
@@ -605,6 +743,14 @@ def _parse_row(row: dict) -> dict:
             row[f] = float(row[f])
     row["deprecated"] = bool(row.get("deprecated"))
 
+    # Tags: psycopg2 may return already-parsed list, a JSON string, or None
+    v = row.get("tags")
+    if v is None:
+        row["tags"] = []
+    elif isinstance(v, str):
+        row["tags"] = json.loads(v)
+    # else already a list (psycopg2 json adapter)
+
     # Применяем переводы игрового контента (machine_name + item names)
     trans = getattr(g, "content_trans", {})
     if trans:
@@ -613,6 +759,7 @@ def _parse_row(row: dict) -> dict:
         for f in ("inputs", "outputs", "maintenance"):
             for entry in row[f]:
                 if "item" in entry:
+                    entry["item_en"] = entry["item"]
                     entry["item"] = trans.get(entry["item"], entry["item"])
 
     return row
@@ -638,48 +785,90 @@ def complex_new():
 @app.route("/complex/<slug>/edit")
 def complex_edit(slug: str):
     """Редактирование комплекса по UUID-слагу.
-    Только владелец может редактировать; остальные перенаправляются на view.
-    Анонимный пользователь может редактировать только комплексы без owner (user_id IS NULL).
+    Только владелец может редактировать; ghost-комплексы и чужие — перенаправляются на view.
     """
+    try:
+        _uuid.UUID(slug)
+    except ValueError:
+        abort(404)
     with get_db() as con:
         with con.cursor() as cur:
-            cur.execute("SELECT id, user_id, visibility FROM complexes WHERE slug = %s", (slug,))
+            cur.execute(
+                "SELECT id, user_id, visibility, is_ghost FROM complexes WHERE slug = %s",
+                (slug,)
+            )
             row = cur.fetchone()
     if not row:
         abort(404)
-    complex_id, owner_id, visibility = row
+    complex_id, owner_id, visibility, is_ghost_complex = row
 
     current_uid = g.user["id"] if g.get("user") else None
-    # Только владелец редактирует; у анонимов нет прав на чужие
-    if owner_id is not None and current_uid != owner_id:
-        return redirect(url_for("complex_view", slug=slug))
+    # Ghost-комплексы всегда read-only для всех.
+    # Редактировать может только владелец (или анонимный пользователь свой guest-комплекс
+    # если у него нет owner, но только если это не ghost).
+    can_edit = (not is_ghost_complex) and (owner_id is None or current_uid == owner_id)
+    if not can_edit:
+        back = request.args.get('back', '')
+        view_url = url_for("complex_view", slug=slug)
+        if back and back.startswith('/'):
+            view_url += f"?back={back}"
+        return redirect(view_url)
 
+    back = request.args.get('back', '')
+    # Разрешаем только относительные URL (начинаются с /) — защита от open redirect
+    if back and back.startswith('/'):
+        from_page = back
+    elif request.args.get('from') == 'community':
+        from_page = '/?tab=community'
+    else:
+        from_page = '/'
     return render_template("complex_editor.html",
                            complex_id=complex_id,
                            readonly=False,
+                           from_page=from_page,
                            user=g.get("user"))
 
 
 @app.route("/complex/<slug>/view")
 def complex_view(slug: str):
-    """Просмотр комплекса (read-only). Приватные — только для владельца."""
+    """Просмотр комплекса (read-only).
+    Если пользователь — владелец (и комплекс не ghost), перенаправляет на edit.
+    """
+    try:
+        _uuid.UUID(slug)
+    except ValueError:
+        abort(404)
     with get_db() as con:
         with con.cursor() as cur:
-            cur.execute("SELECT id, user_id, visibility FROM complexes WHERE slug = %s", (slug,))
+            cur.execute(
+                "SELECT id, user_id, visibility, is_ghost FROM complexes WHERE slug = %s",
+                (slug,)
+            )
             row = cur.fetchone()
     if not row:
         abort(404)
-    complex_id, owner_id, visibility = row
+    complex_id, owner_id, visibility, is_ghost_complex = row
 
-    # Приватный комплекс → только владелец
-    if visibility == "private":
-        current_uid = g.user["id"] if g.get("user") else None
-        if current_uid != owner_id:
-            abort(403)
+    current_uid = g.user["id"] if g.get("user") else None
+    # Если текущий пользователь — владелец (и это не ghost) → отправляем сразу на редактирование
+    if not is_ghost_complex and owner_id is not None and current_uid == owner_id:
+        back = request.args.get('back', '')
+        edit_url = url_for("complex_edit", slug=slug)
+        if back and back.startswith('/'):
+            edit_url += f"?back={back}"
+        return redirect(edit_url)
 
+    back = request.args.get('back', '')
+    if back and back.startswith('/'):
+        from_page = back
+    elif request.args.get('from') == 'community':
+        from_page = '/?tab=community'
+    else:
+        from_page = '/'
     return render_template("complex_editor.html",
                            complex_id=complex_id,
                            readonly=True,
+                           from_page=from_page,
                            user=g.get("user"))
 
 
@@ -687,17 +876,45 @@ def complex_view(slug: str):
 # API: рецепты / комплексы
 # ─────────────────────────────────────────────────────────────────
 
+def _mnt_priority(maintenance: list) -> float:
+    """Приоритет сортировки по обслуживанию — зеркало JS-логики."""
+    if not maintenance:
+        return 0.0
+    def tier(s):
+        m = re.search(r'(\d+)$', s)
+        return int(m.group(1)) if m else 1
+    top = max(maintenance, key=lambda e: tier(e.get('item', '')))
+    return tier(top.get('item', '')) * 100000 + float(top.get('rate_per_min') or 0)
+
+
 @app.route("/api/nodes")
 def api_nodes():
     q_raw       = request.args.get("q",      "").strip()
     type_filter = request.args.get("type",   "all")
-    show_hidden = request.args.get("hidden", "false") == "true"   # true = include hidden items
+    show_hidden = request.args.get("hidden", "false") == "true"
+    sort_key    = request.args.get("sort",   "")          # name|workers|electricity|maintenance
+    sort_dir    = request.args.get("dir",    "asc")       # asc|desc
     page        = max(1, int(request.args.get("page", "1")))
     per_page    = min(100, max(10, int(request.args.get("per_page", "50"))))
     search_ast  = _parse_search(q_raw)
 
-    # Загружаем скрытые рецепты пользователя — всегда (нужно для поля deprecated в ответе)
     hidden_ids: set[int] = _get_hidden_recipe_ids(g.user["id"])
+
+    # Подписанные комплексы текущего пользователя (только публичные, не ghost)
+    subscribed_ids: set[int] = set()
+    if not g.user.get("is_guest"):
+        try:
+            with get_db() as con:
+                with con.cursor() as cur:
+                    cur.execute("""
+                        SELECT cs.complex_id
+                        FROM complex_subscriptions cs
+                        JOIN complexes c ON c.id = cs.complex_id
+                        WHERE cs.user_id = %s AND c.visibility = 'public' AND c.is_ghost = FALSE
+                    """, (g.user["id"],))
+                    subscribed_ids = {r[0] for r in cur.fetchall()}
+        except Exception:
+            pass
 
     try:
         with get_db() as con:
@@ -712,21 +929,35 @@ def api_nodes():
     for row in rows:
         if type_filter != "all" and row["node_type"] != type_filter:
             continue
-
-        # Комплексы показываем только свои (owner_id == текущий пользователь)
-        if row["node_type"] == "complex" and row["owner_id"] != g.user["id"]:
-            continue
-
-        # deprecated для рецептов = только то, что пользователь сам скрыл
+        if row["node_type"] == "complex":
+            if row["owner_id"] == g.user["id"]:
+                row["_subscribed"] = False
+            elif row["node_id"] in subscribed_ids:
+                row["_subscribed"] = True
+            else:
+                continue
         if row["node_type"] == "recipe":
             row["deprecated"] = row["node_id"] in hidden_ids
-
-        # Фильтр: show_hidden=False (default) → скрытые не показываем
         if not show_hidden and row["deprecated"]:
             continue
         if search_ast and not _eval_search(search_ast, row):
             continue
         result.append(row)
+
+    # ── Сортировка всей выборки перед пагинацией ─────────────────────
+    if sort_key:
+        rev = (sort_dir == "desc")
+        if sort_key == "name":
+            result.sort(
+                key=lambda r: (r.get("machine_name") or r.get("name") or "").casefold(),
+                reverse=rev,
+            )
+        elif sort_key == "workers":
+            result.sort(key=lambda r: max(0, r.get("workers") or 0), reverse=rev)
+        elif sort_key == "electricity":
+            result.sort(key=lambda r: abs(r.get("electricity_kw") or 0), reverse=rev)
+        elif sort_key == "maintenance":
+            result.sort(key=lambda r: _mnt_priority(r.get("maintenance") or []), reverse=rev)
 
     total = len(result)
     start = (page - 1) * per_page
@@ -784,12 +1015,11 @@ def api_nodes_for_resource():
                 WHERE rf.parent_type = 1 AND rf.complex_id = c.id AND rf.direction = 1
             ) out ON TRUE
             LEFT JOIN LATERAL (
-                SELECT json_agg(json_build_object('item', bm.item, 'rate_per_min', bm.rate_per_min) ORDER BY bm.item) AS items
-                FROM building_maintenance bm
-                JOIN buildings b ON b.id = bm.building_id
-                WHERE FALSE  -- у комплексов нет прямого обслуживания
+                SELECT json_agg(json_build_object('item', cmnt.item, 'rate_per_min', cmnt.rate_per_min) ORDER BY cmnt.item) AS items
+                FROM complex_maintenance cmnt
+                WHERE cmnt.complex_id = c.id
             ) mnt ON TRUE
-            WHERE c.visibility = 'public'
+            WHERE c.visibility = 'public' AND c.is_ghost = FALSE
               AND EXISTS (
                   SELECT 1 FROM resource_flows rf2
                   JOIN items i2 ON i2.id = rf2.item_id
@@ -819,8 +1049,23 @@ def api_nodes_for_resource():
             result.append(row)
         return jsonify(result)
 
-    # ── Обычный режим: свои рецепты + свои комплексы ──
+    # ── Обычный режим: свои рецепты + свои комплексы + подписки ──
     hidden_ids: set[int] = _get_hidden_recipe_ids(g.user["id"])
+
+    # Подписанные публичные комплексы (не ghost) — появляются как свои в пикере
+    subscribed_ids: set[int] = set()
+    if not g.user.get("is_guest"):
+        try:
+            with get_db() as con:
+                with con.cursor() as cur:
+                    cur.execute("""
+                        SELECT cs.complex_id FROM complex_subscriptions cs
+                        JOIN complexes c ON c.id = cs.complex_id
+                        WHERE cs.user_id = %s AND c.visibility = 'public' AND c.is_ghost = FALSE
+                    """, (g.user["id"],))
+                    subscribed_ids = {r[0] for r in cur.fetchall()}
+        except Exception:
+            pass
 
     try:
         with get_db() as con:
@@ -840,11 +1085,15 @@ def api_nodes_for_resource():
                 continue
         if type_flt != "all" and row["node_type"] != type_flt:
             continue
-        # Для обычного режима — только свои комплексы
-        if row["node_type"] == "complex" and row["owner_id"] != g.user["id"]:
-            continue
+        # Для обычного режима — свои комплексы + подписанные
+        if row["node_type"] == "complex":
+            is_own        = row["owner_id"] == g.user["id"]
+            is_subscribed = row["node_id"] in subscribed_ids
+            if not is_own and not is_subscribed:
+                continue
+            row["_subscribed"] = is_subscribed and not is_own
         check = row["outputs"] if direction == "produces" else row["inputs"]
-        if any(x["item"] == item for x in check):
+        if any((x.get("item_en") or x["item"]) == item for x in check):
             result.append(row)
 
     return jsonify(result)
@@ -881,38 +1130,108 @@ def api_public_complexes():
     sort    = request.args.get("sort", "new")   # new | popular
     page    = max(1, int(request.args.get("page", "1")))
     per_page = min(50, max(5, int(request.args.get("per_page", "20"))))
-    q       = request.args.get("q", "").strip().lower()
+    q       = request.args.get("q", "").strip()
 
     order = "c.likes_count DESC, c.id DESC" if sort == "popular" else "c.id DESC"
     offset = (page - 1) * per_page
 
+    viewer_id = g.user["id"] if g.get("user") else None
+
+    # Используем тот же парсер, что и browse (in:/out:/name:/by: + &|())
+    trans     = getattr(g, "content_trans", {})
+    trans_rev = {v.lower(): k for k, v in trans.items()} if trans else {}
+
+    ast = _parse_search(q) if q.strip() else None
+    filter_params: list = []
+    count_params:  list = []
+    where_frag, needs_users = _build_community_where(ast, filter_params, trans_rev)
+    _build_community_where(ast, count_params, trans_rev)   # отдельный список для COUNT
+
+    extra_where = f" AND {where_frag}" if ast else ""
+    count_join  = "LEFT JOIN users u ON u.id = c.user_id" if needs_users else ""
+
     with get_db() as con:
         with dict_cursor(con) as cur:
-            where_q = "AND LOWER(c.name) LIKE %s" if q else ""
-            params  = [f"%{q}%"] if q else []
-
             cur.execute(f"""
                 SELECT COUNT(*) AS total
                 FROM complexes c
-                WHERE c.visibility = 'public'
-                {where_q}
-            """, params)
+                {count_join}
+                WHERE c.visibility = 'public' AND c.is_ghost = FALSE
+                {extra_where}
+            """, count_params)
             total = cur.fetchone()["total"]
 
             cur.execute(f"""
-                SELECT c.id, c.name, c.description, c.likes_count,
+                SELECT c.id, c.slug, c.name, c.description, c.likes_count,
                        c.total_workers, c.total_electricity_kw,
+                       c.user_id,
                        u.display_name AS author, u.avatar_url AS author_avatar,
                        c.forked_from_id,
-                       c.updated_at
+                       cf.slug AS forked_from_slug,
+                       c.updated_at,
+                       (cl.complex_id IS NOT NULL) AS _liked,
+                       (cs.complex_id IS NOT NULL) AS _subscribed,
+                       (SELECT COUNT(*) FROM complexes c2
+                        WHERE c2.forked_from_id = c.id)::int AS fork_count,
+                       (SELECT json_agg(json_build_object(
+                                            'item', i.name,
+                                            'qty_per_min', rf.qty_per_min)
+                                        ORDER BY rf.sort_order)
+                        FROM resource_flows rf JOIN items i ON i.id = rf.item_id
+                        WHERE rf.parent_type = 1 AND rf.parent_id = c.id
+                          AND rf.direction = 0) AS inputs,
+                       (SELECT json_agg(json_build_object(
+                                            'item', i.name,
+                                            'qty_per_min', rf.qty_per_min)
+                                        ORDER BY rf.sort_order)
+                        FROM resource_flows rf JOIN items i ON i.id = rf.item_id
+                        WHERE rf.parent_type = 1 AND rf.parent_id = c.id
+                          AND rf.direction = 1) AS outputs,
+                       (SELECT json_agg(json_build_object(
+                                            'item', cm2.item,
+                                            'rate_per_min', cm2.rate_per_min))
+                        FROM complex_maintenance cm2
+                        WHERE cm2.complex_id = c.id) AS maintenance,
+                       COALESCE((SELECT json_agg(tg.name ORDER BY tg.name)
+                        FROM complex_tags ct2
+                        JOIN tags tg ON tg.id = ct2.tag_id
+                        WHERE ct2.complex_id = c.id), '[]'::json) AS tags
                 FROM complexes c
                 LEFT JOIN users u ON u.id = c.user_id
-                WHERE c.visibility = 'public'
-                {where_q}
+                LEFT JOIN complex_likes cl
+                       ON cl.complex_id = c.id AND cl.user_id = %s
+                LEFT JOIN complex_subscriptions cs
+                       ON cs.complex_id = c.id AND cs.user_id = %s
+                LEFT JOIN complexes cf ON cf.id = c.forked_from_id
+                WHERE c.visibility = 'public' AND c.is_ghost = FALSE
+                {extra_where}
                 ORDER BY {order}
                 LIMIT %s OFFSET %s
-            """, params + [per_page, offset])
+            """, [viewer_id, viewer_id] + filter_params + [per_page, offset])
             items = [dict(r) for r in cur.fetchall()]
+
+    # Перевести названия ресурсов; сохранить item_en (EN-имя) для поиска иконок
+    # trans уже получен выше при построении WHERE
+    for row in items:
+        # Конвертировать Decimal в float (total_electricity_kw может быть numeric)
+        for num_col in ("total_electricity_kw", "total_workers", "likes_count"):
+            if isinstance(row.get(num_col), decimal.Decimal):
+                row[num_col] = float(row[num_col])
+        if trans:
+            for key in ("inputs", "outputs", "maintenance"):
+                lst = row.get(key)
+                if isinstance(lst, str):
+                    try:
+                        lst = json.loads(lst)
+                    except Exception:
+                        lst = None
+                if isinstance(lst, list):
+                    row[key] = [
+                        {**r,
+                         "item_en": r.get("item", ""),
+                         "item":    trans.get(r.get("item", ""), r.get("item", ""))}
+                        for r in lst if isinstance(r, dict)
+                    ]
 
     return jsonify({
         "total":    int(total),
@@ -932,10 +1251,16 @@ def api_my_complexes():
     with get_db() as con:
         with dict_cursor(con) as cur:
             cur.execute("""
-                SELECT c.id, c.name, c.description, c.visibility,
+                SELECT c.id, c.slug, c.name, c.description, c.visibility,
                        c.likes_count, c.total_workers, c.total_electricity_kw,
-                       c.forked_from_id, c.updated_at
+                       c.forked_from_id, c.updated_at,
+                       cf.slug AS forked_from_slug,
+                       COALESCE((SELECT json_agg(tg.name ORDER BY tg.name)
+                        FROM complex_tags ct2
+                        JOIN tags tg ON tg.id = ct2.tag_id
+                        WHERE ct2.complex_id = c.id), '[]'::json) AS tags
                 FROM complexes c
+                LEFT JOIN complexes cf ON cf.id = c.forked_from_id
                 WHERE c.user_id = %s
                 ORDER BY c.id DESC
             """, (g.user["id"],))
@@ -944,11 +1269,233 @@ def api_my_complexes():
     return jsonify(items)
 
 
+@app.route("/api/complex/<int:complex_id>/cascade-info")
+def api_cascade_info(complex_id: int):
+    """Вернуть вложенные и зависимые комплексы для предупреждений каскадных операций."""
+    with get_db() as con:
+        with dict_cursor(con) as cur:
+            # Все дочерние комплексы рекурсивно (включены в этот комплекс)
+            cur.execute("""
+                WITH RECURSIVE children AS (
+                    SELECT cm.child_complex_id AS id
+                    FROM complex_members cm
+                    WHERE cm.complex_id = %s AND cm.child_complex_id IS NOT NULL
+                    UNION ALL
+                    SELECT cm.child_complex_id
+                    FROM complex_members cm
+                    JOIN children c ON cm.complex_id = c.id
+                    WHERE cm.child_complex_id IS NOT NULL
+                )
+                SELECT DISTINCT c2.id, c2.name, c2.visibility
+                FROM children ch
+                JOIN complexes c2 ON c2.id = ch.id
+            """, (complex_id,))
+            all_children = cur.fetchall()
+
+            # Все родительские комплексы рекурсивно (используют этот комплекс)
+            cur.execute("""
+                WITH RECURSIVE parents AS (
+                    SELECT cm.complex_id AS id
+                    FROM complex_members cm
+                    WHERE cm.child_complex_id = %s
+                    UNION ALL
+                    SELECT cm.complex_id
+                    FROM complex_members cm
+                    JOIN parents p ON cm.child_complex_id = p.id
+                )
+                SELECT DISTINCT c2.id, c2.name, c2.visibility
+                FROM parents p
+                JOIN complexes c2 ON c2.id = p.id
+            """, (complex_id,))
+            all_parents = cur.fetchall()
+
+    return jsonify({
+        "private_children": [x for x in all_children if x["visibility"] == "private"],
+        "public_parents":   [x for x in all_parents  if x["visibility"] == "public"],
+        "all_parents":      list(all_parents),
+    })
+
+
+# ─────────────────────────────────────────────────────────────────
+# Shadow fork helper
+# ─────────────────────────────────────────────────────────────────
+
+def _create_shadow_fork(con, complex_id: int, reason: str):
+    """Создаёт ghost-копию комплекса для зависимых комплексов других пользователей.
+
+    Если другие пользователи используют complex_id как узел в своих комплексах,
+    создаётся заморозка (ghost) текущего состояния и их complex_members переключаются
+    на ghost, чтобы не сломать их схемы при редактировании/удалении/приватизации.
+
+    Возвращает id ghost или None если зависимостей нет.
+    """
+    with con.cursor() as cur:
+        # Владелец оригинала
+        cur.execute("SELECT user_id FROM complexes WHERE id = %s", (complex_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        owner_id = row[0]
+
+        # Строки complex_members, ссылающихся на этот комплекс от других пользователей
+        cur.execute("""
+            SELECT cm.id
+            FROM complex_members cm
+            JOIN complexes parent ON parent.id = cm.complex_id
+            WHERE cm.child_complex_id = %s
+              AND (parent.user_id IS DISTINCT FROM %s)
+              AND parent.is_ghost = FALSE
+        """, (complex_id, owner_id))
+        dep_ids = [r[0] for r in cur.fetchall()]
+
+        if not dep_ids:
+            return None
+
+        # Данные оригинала
+        cur.execute("""
+            SELECT name, description, total_workers, total_electricity_kw, likes_count
+            FROM complexes WHERE id = %s
+        """, (complex_id,))
+        orig = cur.fetchone()
+        if not orig:
+            return None
+
+        # Создать ghost-запись
+        cur.execute("""
+            INSERT INTO complexes
+                (name, description, user_id, visibility,
+                 is_ghost, ghost_of_id, ghost_likes_count, ghost_reason,
+                 total_workers, total_electricity_kw)
+            VALUES (%s, %s, NULL, 'public', TRUE, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (orig[0], orig[1], complex_id, orig[4], reason, orig[2], orig[3]))
+        ghost_id = cur.fetchone()[0]
+
+        # Скопировать узлы с маппингом old_id → new_id для рёбер
+        cur.execute(
+            "SELECT id FROM complex_members WHERE complex_id = %s ORDER BY id",
+            (complex_id,)
+        )
+        old_ids = [r[0] for r in cur.fetchall()]
+
+        cur.execute("""
+            INSERT INTO complex_members
+                (complex_id, child_type, child_id, recipe_id, child_complex_id,
+                 multiplier, pos_x, pos_y, efficiency,
+                 idle_item, idle_direction, is_manual_partial, external_ports)
+            SELECT %s, child_type, child_id, recipe_id, child_complex_id,
+                   multiplier, pos_x, pos_y, efficiency,
+                   idle_item, idle_direction, is_manual_partial, external_ports
+            FROM complex_members WHERE complex_id = %s ORDER BY id
+            RETURNING id
+        """, (ghost_id, complex_id))
+        new_ids = [r[0] for r in cur.fetchall()]
+        id_map = dict(zip(old_ids, new_ids))
+
+        # Скопировать рёбра
+        cur.execute("""
+            SELECT from_member_id, to_member_id, resource_item, lcm_mode
+            FROM complex_edges WHERE complex_id = %s
+        """, (complex_id,))
+        edges = cur.fetchall()
+        to_insert = [
+            (ghost_id, id_map[e[0]], id_map[e[1]], e[2], e[3])
+            for e in edges if e[0] in id_map and e[1] in id_map
+        ]
+        if to_insert:
+            cur.executemany("""
+                INSERT INTO complex_edges
+                    (complex_id, from_member_id, to_member_id, resource_item, lcm_mode)
+                VALUES (%s, %s, %s, %s, %s)
+            """, to_insert)
+
+        # Скопировать агрегированные потоки
+        cur.execute("""
+            INSERT INTO resource_flows
+                (parent_type, parent_id, recipe_id, complex_id,
+                 item_id, direction, qty_per_cycle, qty_per_min, sort_order)
+            SELECT parent_type, %s, recipe_id, %s,
+                   item_id, direction, qty_per_cycle, qty_per_min, sort_order
+            FROM resource_flows WHERE parent_type = 1 AND complex_id = %s
+        """, (ghost_id, ghost_id, complex_id))
+
+        # Скопировать техобслуживание
+        cur.execute("""
+            INSERT INTO complex_maintenance (complex_id, item, rate_per_min)
+            SELECT %s, item, rate_per_min FROM complex_maintenance WHERE complex_id = %s
+        """, (ghost_id, complex_id))
+
+        # Переключить зависимые узлы на ghost
+        cur.execute("""
+            UPDATE complex_members
+            SET child_complex_id = %s, child_id = %s
+            WHERE id = ANY(%s)
+        """, (ghost_id, ghost_id, dep_ids))
+
+        return ghost_id
+
+
+def _auto_subscribe_community_nodes(con, complex_id: int, user_id: int) -> None:
+    """Автоподписка на публичные комплексы сообщества, использованные как узлы."""
+    with con.cursor() as cur:
+        cur.execute("""
+            INSERT INTO complex_subscriptions (user_id, complex_id)
+            SELECT DISTINCT %s, cm.child_complex_id
+            FROM complex_members cm
+            JOIN complexes c ON c.id = cm.child_complex_id
+            WHERE cm.complex_id = %s
+              AND cm.child_type = 1
+              AND c.visibility = 'public'
+              AND c.is_ghost = FALSE
+              AND c.user_id IS DISTINCT FROM %s
+            ON CONFLICT DO NOTHING
+        """, (user_id, complex_id, user_id))
+
+
+# ─────────────────────────────────────────────────────────────────
+# API: подписки на комплексы сообщества
+# ─────────────────────────────────────────────────────────────────
+
+@app.route("/api/complex/<int:complex_id>/subscribe", methods=["POST", "DELETE"])
+@limiter.limit("120 per hour")
+def api_complex_subscribe(complex_id: int):
+    """Подписка / отписка от публичного комплекса сообщества."""
+    if not g.get("user") or g.user.get("is_guest"):
+        return jsonify({"error": "login_required"}), 401
+
+    uid = g.user["id"]
+    with get_db() as con:
+        with con.cursor() as cur:
+            if request.method == "POST":
+                cur.execute(
+                    "SELECT user_id FROM complexes WHERE id = %s"
+                    " AND visibility = 'public' AND is_ghost = FALSE",
+                    (complex_id,)
+                )
+                row = cur.fetchone()
+                if not row:
+                    return jsonify({"error": "not found or not public"}), 404
+                if row[0] == uid:
+                    return jsonify({"error": "cannot subscribe to own complex"}), 400
+                cur.execute("""
+                    INSERT INTO complex_subscriptions (user_id, complex_id)
+                    VALUES (%s, %s) ON CONFLICT DO NOTHING
+                """, (uid, complex_id))
+            else:
+                cur.execute(
+                    "DELETE FROM complex_subscriptions WHERE user_id = %s AND complex_id = %s",
+                    (uid, complex_id)
+                )
+        con.commit()
+    return jsonify({"ok": True, "subscribed": request.method == "POST"})
+
+
 @app.route("/api/complex/<int:complex_id>/visibility", methods=["PATCH"])
 def api_complex_visibility(complex_id: int):
-    """Изменить видимость комплекса (private ↔ public)."""
+    """Изменить видимость комплекса (private ↔ public), опционально каскадно."""
     data = request.get_json(silent=True) or {}
     visibility = data.get("visibility")
+    cascade    = bool(data.get("cascade", False))
     if visibility not in ("private", "public"):
         return jsonify({"error": "visibility must be private or public"}), 400
 
@@ -958,12 +1505,57 @@ def api_complex_visibility(complex_id: int):
 
     with get_db() as con:
         with con.cursor() as cur:
-            cur.execute(
-                "UPDATE complexes SET visibility = %s WHERE id = %s AND user_id = %s RETURNING id",
-                (visibility, complex_id, g.user["id"]),
-            )
-            if not cur.fetchone():
-                return jsonify({"error": "not found or forbidden"}), 404
+            if not cascade:
+                # Shadow fork для всех, кто зависит от этого комплекса (только при приватизации)
+                if visibility == "private":
+                    _create_shadow_fork(con, complex_id, "privatized")
+                cur.execute(
+                    "UPDATE complexes SET visibility = %s WHERE id = %s AND user_id = %s RETURNING id",
+                    (visibility, complex_id, g.user["id"]),
+                )
+                if not cur.fetchone():
+                    return jsonify({"error": "not found or forbidden"}), 404
+            elif visibility == "public":
+                # Каскадная публикация: этот комплекс + все вложенные рекурсивно
+                cur.execute("""
+                    WITH RECURSIVE children AS (
+                        SELECT %s::int AS id
+                        UNION ALL
+                        SELECT cm.child_complex_id
+                        FROM complex_members cm
+                        JOIN children c ON cm.complex_id = c.id
+                        WHERE cm.child_complex_id IS NOT NULL
+                    )
+                    UPDATE complexes SET visibility = 'public'
+                    WHERE id IN (SELECT id FROM children WHERE id IS NOT NULL)
+                      AND user_id = %s
+                """, (complex_id, g.user["id"]))
+                if cur.rowcount == 0:
+                    return jsonify({"error": "not found or forbidden"}), 404
+            else:
+                # Каскадное снятие: этот комплекс + все родители рекурсивно
+                # Сначала получаем список всех затронутых ID
+                cur.execute("""
+                    WITH RECURSIVE parents AS (
+                        SELECT %s::int AS id
+                        UNION ALL
+                        SELECT cm.complex_id
+                        FROM complex_members cm
+                        JOIN parents p ON cm.child_complex_id = p.id
+                    )
+                    SELECT DISTINCT id FROM parents WHERE id IS NOT NULL
+                """, (complex_id,))
+                ids_to_privatize = [r[0] for r in cur.fetchall()]
+                # Shadow fork для каждого из них
+                for cid in ids_to_privatize:
+                    _create_shadow_fork(con, cid, "privatized")
+                # Применяем приватизацию
+                cur.execute("""
+                    UPDATE complexes SET visibility = 'private'
+                    WHERE id = ANY(%s) AND user_id = %s
+                """, (ids_to_privatize, g.user["id"]))
+                if cur.rowcount == 0:
+                    return jsonify({"error": "not found or forbidden"}), 404
         con.commit()
     return jsonify({"ok": True, "visibility": visibility})
 
@@ -991,43 +1583,92 @@ def api_complex_fork(complex_id: int):
                 "message": f"Maximum {MAX_COMPLEXES} complexes per account. Delete old ones to create new.",
             }), 403
 
-    with get_db() as con:
-        with con.cursor() as cur:
-            # Проверить что оригинал публичный
-            cur.execute(
-                "SELECT id, name FROM complexes WHERE id = %s AND visibility = 'public'",
-                (complex_id,),
-            )
-            orig = cur.fetchone()
-            if not orig:
-                return jsonify({"error": "not found or not public"}), 404
+    try:
+        with get_db() as con:
+            with con.cursor() as cur:
+                # Проверить что оригинал публичный ИЛИ принадлежит текущему пользователю
+                cur.execute(
+                    "SELECT id, name, user_id FROM complexes WHERE id = %s AND (visibility = 'public' OR user_id = %s)",
+                    (complex_id, g.user["id"]),
+                )
+                orig = cur.fetchone()
+                if not orig:
+                    return jsonify({"error": "not found or not public"}), 404
 
-            # Создать копию
-            cur.execute("""
-                INSERT INTO complexes (name, user_id, visibility, forked_from_id)
-                VALUES (%s, %s, 'private', %s)
-                RETURNING id
-            """, (f"[Copy] {orig[1]}", g.user["id"], complex_id))
-            new_id = cur.fetchone()[0]
+                # Локальная копия (своего же комплекса) — не привязывать к источнику
+                is_self_copy = orig[2] == g.user["id"]
+                fork_parent_id = None if is_self_copy else complex_id
 
-            # Скопировать члены
-            cur.execute("""
-                INSERT INTO complex_members
-                    (complex_id, child_type, child_id, recipe_id, child_complex_id,
-                     multiplier, pos_x, pos_y, efficiency, idle_item, idle_direction,
-                     is_manual_partial)
-                SELECT %s, child_type, child_id, recipe_id, child_complex_id,
-                       multiplier, pos_x, pos_y, efficiency, idle_item, idle_direction,
-                       is_manual_partial
-                FROM complex_members
-                WHERE complex_id = %s
-                RETURNING id
-            """, (new_id, complex_id))
-            # (рёбра требуют маппинга старых → новых member_id; для упрощения — пересчитаем)
-            cur.execute("SELECT recalculate_complex(%s)", (new_id,))
-            cur.execute("SELECT slug FROM complexes WHERE id = %s", (new_id,))
-            new_slug = str(cur.fetchone()[0])
-        con.commit()
+                # Подобрать уникальное имя: "[Copy] X", "[Copy] X (2)", ...
+                base_name = f"[Copy] {orig[1]}"
+                cur.execute("""
+                    SELECT name FROM complexes
+                    WHERE user_id = %s AND (name = %s OR name LIKE %s)
+                """, (g.user["id"], base_name, base_name + " (%)"))
+                existing_names = {r[0] for r in cur.fetchall()}
+                if base_name not in existing_names:
+                    copy_name = base_name
+                else:
+                    n = 2
+                    while f"{base_name} ({n})" in existing_names:
+                        n += 1
+                    copy_name = f"{base_name} ({n})"
+
+                # Создать копию (локальные копии не хранят ссылку на оригинал)
+                cur.execute("""
+                    INSERT INTO complexes (name, user_id, visibility, forked_from_id)
+                    VALUES (%s, %s, 'private', %s)
+                    RETURNING id
+                """, (copy_name, g.user["id"], fork_parent_id))
+                new_id = cur.fetchone()[0]
+
+                # Скопировать члены; сохранить маппинг old_id → new_id для рёбер
+                cur.execute(
+                    "SELECT id FROM complex_members WHERE complex_id = %s ORDER BY id",
+                    (complex_id,),
+                )
+                old_member_ids = [r[0] for r in cur.fetchall()]
+
+                cur.execute("""
+                    INSERT INTO complex_members
+                        (complex_id, child_type, child_id, recipe_id, child_complex_id,
+                         multiplier, pos_x, pos_y, efficiency, idle_item, idle_direction,
+                         is_manual_partial, external_ports)
+                    SELECT %s, child_type, child_id, recipe_id, child_complex_id,
+                           multiplier, pos_x, pos_y, efficiency, idle_item, idle_direction,
+                           is_manual_partial, external_ports
+                    FROM complex_members
+                    WHERE complex_id = %s ORDER BY id
+                    RETURNING id
+                """, (new_id, complex_id))
+                new_member_ids = [r[0] for r in cur.fetchall()]
+                id_map = dict(zip(old_member_ids, new_member_ids))
+
+                # Скопировать рёбра с пересчитанными member_id
+                cur.execute("""
+                    SELECT from_member_id, to_member_id, resource_item, lcm_mode
+                    FROM complex_edges WHERE complex_id = %s
+                """, (complex_id,))
+                old_edges = cur.fetchall()
+                edges_to_copy = [
+                    (new_id, id_map[e[0]], id_map[e[1]], e[2], e[3])
+                    for e in old_edges
+                    if e[0] in id_map and e[1] in id_map
+                ]
+                if edges_to_copy:
+                    cur.executemany("""
+                        INSERT INTO complex_edges
+                            (complex_id, from_member_id, to_member_id, resource_item, lcm_mode)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, edges_to_copy)
+
+                cur.execute("SELECT recalculate_complex(%s)", (new_id,))
+                cur.execute("SELECT slug FROM complexes WHERE id = %s", (new_id,))
+                new_slug = str(cur.fetchone()[0])
+            con.commit()
+    except Exception as e:
+        import traceback
+        return jsonify({"error": repr(e), "detail": traceback.format_exc()}), 500
 
     return jsonify({"ok": True, "id": new_id, "slug": new_slug}), 201
 
@@ -1036,11 +1677,18 @@ def api_complex_fork(complex_id: int):
 @limiter.limit("60 per hour")
 def api_complex_like(complex_id: int):
     """Поставить / убрать лайк."""
-    if not g.get("user"):
+    if not g.get("user") or g.user.get("is_guest"):
         return jsonify({"error": "login_required"}), 401
     user_id = g.user["id"]
     with get_db() as con:
         with con.cursor() as cur:
+            # Проверить что комплекс существует и публичный
+            cur.execute(
+                "SELECT id FROM complexes WHERE id = %s AND visibility = 'public'",
+                (complex_id,),
+            )
+            if not cur.fetchone():
+                return jsonify({"error": "not found"}), 404
             if request.method == "POST":
                 cur.execute("""
                     INSERT INTO complex_likes (user_id, complex_id)
@@ -1079,19 +1727,26 @@ def api_complex_graph(complex_id: int):
         with get_db() as con:
             with dict_cursor(con) as cur:
                 cur.execute(
-                    "SELECT id, name, description, user_id, visibility, forked_from_id, likes_count FROM complexes WHERE id = %s",
+                    """SELECT c.id, c.name, c.description, c.user_id, c.visibility,
+                              c.forked_from_id, c.likes_count,
+                              cf.slug AS forked_from_slug,
+                              c.is_ghost, c.ghost_of_id, c.ghost_reason, c.ghost_likes_count,
+                              ghost_orig.slug AS ghost_of_slug,
+                              (ghost_orig.visibility = 'public') AS ghost_of_visible,
+                              u.display_name AS author_name
+                       FROM complexes c
+                       LEFT JOIN complexes cf ON cf.id = c.forked_from_id
+                       LEFT JOIN complexes ghost_orig ON ghost_orig.id = c.ghost_of_id
+                       LEFT JOIN users u ON u.id = c.user_id
+                       WHERE c.id = %s""",
                     (complex_id,),
                 )
                 cx = cur.fetchone()
                 if not cx:
                     return jsonify({"error": "not found"}), 404
 
-                # Доступ: публичный — всем; приватный — только владельцу
+                # Доступ: UUID-slug является достаточной защитой — проверка не нужна
                 cx = dict(cx)
-                if cx["visibility"] == "private":
-                    uid = g.user["id"] if g.get("user") else None
-                    if uid != cx["user_id"]:
-                        return jsonify({"error": "forbidden"}), 403
 
                 cur.execute("""
                     SELECT
@@ -1100,16 +1755,26 @@ def api_complex_graph(complex_id: int):
                         cm.efficiency, cm.idle_item, cm.idle_direction, cm.is_manual_partial,
                         cm.external_ports,
                         r.machine_name,
-                        b.workers, b.electricity_kw,
-                        c2.name  AS complex_name,
-                        c2.slug  AS complex_slug,
+                        b.workers,          b.electricity_kw,
+                        c2.name             AS complex_name,
+                        c2.slug             AS complex_slug,
+                        c2.total_workers    AS complex_workers,
+                        c2.total_electricity_kw AS complex_electricity_kw,
+                        c2.user_id          AS complex_owner_id,
+                        c2.is_ghost         AS complex_is_ghost,
+                        c2.ghost_reason     AS complex_ghost_reason,
+                        c2.ghost_of_id      AS complex_ghost_of_id,
+                        ghost_orig.slug     AS complex_ghost_of_slug,
+                        ghost_orig.visibility::text AS complex_ghost_of_visibility,
                         inp.items  AS inputs,
                         out.items  AS outputs,
-                        mnt.items  AS maintenance
+                        mnt.items  AS maintenance,
+                        mnt_cx.items AS complex_maintenance
                     FROM complex_members cm
                     LEFT JOIN recipes   r  ON r.id  = cm.recipe_id
                     LEFT JOIN buildings b  ON b.id  = r.machine_id
                     LEFT JOIN complexes c2 ON c2.id = cm.child_complex_id
+                    LEFT JOIN complexes ghost_orig ON ghost_orig.id = c2.ghost_of_id
 
                     LEFT JOIN LATERAL (
                         SELECT json_agg(json_build_object(
@@ -1135,6 +1800,13 @@ def api_complex_graph(complex_id: int):
                             ORDER BY bm.item) AS items
                         FROM building_maintenance bm WHERE bm.building_id = b.id
                     ) mnt ON (cm.child_type = 0)
+
+                    LEFT JOIN LATERAL (
+                        SELECT json_agg(json_build_object(
+                            'item', cmnt.item, 'rate_per_min', cmnt.rate_per_min)
+                            ORDER BY cmnt.item) AS items
+                        FROM complex_maintenance cmnt WHERE cmnt.complex_id = cm.child_complex_id
+                    ) mnt_cx ON (cm.child_type = 1)
 
                     WHERE cm.complex_id = %s
                     ORDER BY cm.id
@@ -1168,20 +1840,54 @@ def api_complex_graph(complex_id: int):
                             "qty_per_min": float(row["qty_per_min"]),
                         })
 
+                # Теги
+                cur.execute("""
+                    SELECT t.name FROM complex_tags ct
+                    JOIN tags t ON t.id = ct.tag_id
+                    WHERE ct.complex_id = %s ORDER BY t.name
+                """, (cx["id"],))
+                cx_tags = [r['name'] for r in cur.fetchall()]
+
+                viewer_id = g.user["id"] if g.get("user") and not g.user.get("is_guest") else None
+                liked = False
+                subscribed = False
+                if viewer_id:
+                    cur.execute(
+                        "SELECT 1 FROM complex_likes WHERE user_id = %s AND complex_id = %s",
+                        (viewer_id, cx["id"]),
+                    )
+                    liked = bool(cur.fetchone())
+                    cur.execute(
+                        "SELECT 1 FROM complex_subscriptions WHERE user_id = %s AND complex_id = %s",
+                        (viewer_id, cx["id"]),
+                    )
+                    subscribed = bool(cur.fetchone())
+
+        trans = getattr(g, "content_trans", {})
+
+        def _f(v):
+            return float(v) if isinstance(v, decimal.Decimal) else v
+
         nodes = []
         for m in members:
             m = dict(m)
             is_complex = (m["child_type"] == 1)
             if is_complex:
                 sf = sub_flows.get(m["child_id"], {"inputs": [], "outputs": []})
-                inp_list, out_list, mnt_list = sf["inputs"], sf["outputs"], []
+                inp_list     = _add_item_display(sf["inputs"])
+                out_list     = _add_item_display(sf["outputs"])
+                mnt_list     = _add_item_display(_parse_json_list(m["complex_maintenance"]))
+                workers_val  = _f(m["complex_workers"])       if m.get("complex_workers")       is not None else None
+                elec_val     = _f(m["complex_electricity_kw"]) if m.get("complex_electricity_kw") is not None else None
             else:
-                inp_list = _parse_json_list(m["inputs"])
-                out_list = _parse_json_list(m["outputs"])
-                mnt_list = _parse_json_list(m["maintenance"])
+                inp_list     = _add_item_display(_parse_json_list(m["inputs"]))
+                out_list     = _add_item_display(_parse_json_list(m["outputs"]))
+                mnt_list     = _add_item_display(_parse_json_list(m["maintenance"]))
+                workers_val  = _f(m["workers"])       if m["workers"]       is not None else None
+                elec_val     = _f(m["electricity_kw"]) if m["electricity_kw"] is not None else None
 
-            def _f(v):
-                return float(v) if isinstance(v, decimal.Decimal) else v
+            raw_label = m["machine_name"] or m["complex_name"] or "?"
+            label = trans.get(raw_label, raw_label) if trans and m["machine_name"] else raw_label
 
             nodes.append({
                 "id":             m["id"],
@@ -1195,23 +1901,48 @@ def api_complex_graph(complex_id: int):
                 "idle_direction":    m["idle_direction"],
                 "is_manual_partial": bool(m["is_manual_partial"]),
                 "external_ports":    json.loads(m["external_ports"]) if m.get("external_ports") else [],
-                "label":            m["machine_name"] or m["complex_name"] or "?",
+                "label":            label,
                 "node_ref_slug":    str(m["complex_slug"]) if m.get("complex_slug") else None,
-                "workers":          _f(m["workers"]) if m["workers"] is not None else None,
-                "electricity_kw":   _f(m["electricity_kw"]) if m["electricity_kw"] is not None else None,
+                "workers":          workers_val,
+                "electricity_kw":   elec_val,
                 "inputs":           inp_list,
                 "outputs":          out_list,
                 "maintenance":      mnt_list,
+                # Ownership + Ghost info (только для complex-узлов)
+                "owner_id":         m.get("complex_owner_id") if is_complex else None,
+                "is_ghost":         bool(m.get("complex_is_ghost")) if is_complex else False,
+                "ghost_reason":     m.get("complex_ghost_reason") if is_complex else None,
+                "ghost_of_id":      m.get("complex_ghost_of_id") if is_complex else None,
+                "ghost_of_slug":    str(m["complex_ghost_of_slug"]) if (is_complex and m.get("complex_ghost_of_slug")) else None,
+                "ghost_of_visible": (m.get("complex_ghost_of_visibility") == "public") if is_complex else False,
             })
 
+        if trans:
+            for e in edges:
+                if e.get("resource_item") and e["resource_item"] in trans:
+                    e["resource_item_display"] = trans[e["resource_item"]]
+
+        is_ghost_cx = bool(cx.get("is_ghost"))
         return jsonify({
             "id":             cx["id"],
             "name":           cx["name"],
             "description":    cx["description"],
             "visibility":     cx["visibility"],
-            "forked_from_id": cx.get("forked_from_id"),
+            "forked_from_id":   cx.get("forked_from_id"),
+            "forked_from_slug": cx.get("forked_from_slug"),
             "likes_count":    cx.get("likes_count", 0),
-            "is_owner":       g.get("user") and g.user["id"] == cx["user_id"],
+            "_liked":         liked and not is_ghost_cx,
+            "_subscribed":    subscribed,
+            "is_owner":       (not is_ghost_cx) and g.get("user") and g.user["id"] == cx["user_id"],
+            "author_name":    cx.get("author_name"),
+            "tags":           cx_tags,
+            # Ghost fields for top-level complex
+            "is_ghost":           is_ghost_cx,
+            "ghost_reason":       cx.get("ghost_reason"),
+            "ghost_of_id":        cx.get("ghost_of_id"),
+            "ghost_likes_count":  cx.get("ghost_likes_count"),
+            "ghost_of_slug":      str(cx["ghost_of_slug"]) if cx.get("ghost_of_slug") else None,
+            "ghost_of_visible":   bool(cx.get("ghost_of_visible")),
             "nodes":          nodes,
             "edges":          edges,
         })
@@ -1310,6 +2041,29 @@ def _save_complex_graph(con, complex_id, data, user_id: int | None):
                 ed["resource_item"], bool(ed.get("lcm_mode", False)),
             ))
 
+        # Теги
+        if "tags" in data:
+            raw = data["tags"] if isinstance(data["tags"], list) else []
+            normalized = []
+            for t in raw[:12]:
+                t = re.sub(r'[^\w\-]', '', str(t).lower().strip())[:30]
+                if len(t) >= 2 and t not in normalized:
+                    normalized.append(t)
+            normalized = normalized[:10]
+            # upsert tag names
+            for tname in normalized:
+                cur.execute(
+                    "INSERT INTO tags(name) VALUES(%s) ON CONFLICT(name) DO NOTHING",
+                    (tname,)
+                )
+            # replace complex_tags
+            cur.execute("DELETE FROM complex_tags WHERE complex_id = %s", (complex_id,))
+            if normalized:
+                cur.execute("""
+                    INSERT INTO complex_tags(complex_id, tag_id)
+                    SELECT %s, id FROM tags WHERE name = ANY(%s)
+                """, (complex_id, normalized))
+
         cur.execute("SELECT recalculate_complex(%s)", (complex_id,))
 
         # Remove noise flows after recalculation
@@ -1342,6 +2096,38 @@ def _save_complex_graph(con, complex_id, data, user_id: int | None):
         """, (complex_id, complex_id))
 
     return complex_id
+
+
+# ─────────────────────────────────────────────────────────────────
+# API: autocomplete тегов
+# ─────────────────────────────────────────────────────────────────
+
+@app.route("/api/tags")
+def api_tags():
+    """Возвращает до 10 тегов, начинающихся с ?q=, отсортированных по популярности."""
+    q = re.sub(r'[^\w\-]', '', request.args.get("q", "").strip().lower())
+    with get_db() as con:
+        with con.cursor() as cur:
+            if q:
+                cur.execute("""
+                    SELECT t.name, COUNT(ct.complex_id) AS usage
+                    FROM tags t
+                    LEFT JOIN complex_tags ct ON ct.tag_id = t.id
+                    WHERE t.name LIKE %s
+                    GROUP BY t.name
+                    ORDER BY usage DESC, t.name
+                    LIMIT 10
+                """, (q + "%",))
+            else:
+                cur.execute("""
+                    SELECT t.name, COUNT(ct.complex_id) AS usage
+                    FROM tags t
+                    LEFT JOIN complex_tags ct ON ct.tag_id = t.id
+                    GROUP BY t.name
+                    ORDER BY usage DESC, t.name
+                    LIMIT 10
+                """)
+            return jsonify([{"name": r[0]} for r in cur.fetchall()])
 
 
 @app.route("/api/complex", methods=["POST"])
@@ -1423,6 +2209,9 @@ def api_complex_create():
     try:
         with get_db() as con:
             cid = _save_complex_graph(con, None, data, g.user["id"])
+            # Автоподписка на комплексы сообщества, использованные как узлы
+            if not g.user.get("is_guest"):
+                _auto_subscribe_community_nodes(con, cid, g.user["id"])
             with con.cursor() as cur:
                 cur.execute("SELECT slug FROM complexes WHERE id = %s", (cid,))
                 slug_row = cur.fetchone()
@@ -1445,7 +2234,13 @@ def api_complex_update(complex_id: int):
     data = request.get_json(silent=True) or {}
     try:
         with get_db() as con:
+            # Shadow fork: заморозить текущее состояние для зависимых пользователей
+            _create_shadow_fork(con, complex_id, "edited")
+            # Сохранить новое состояние
             _save_complex_graph(con, complex_id, data, g.user["id"])
+            # Автоподписка на комплексы сообщества, использованные как узлы
+            if not g.user.get("is_guest"):
+                _auto_subscribe_community_nodes(con, complex_id, g.user["id"])
             con.commit()
         return jsonify({"ok": True, "id": complex_id})
     except psycopg2.errors.UniqueViolation:
@@ -1464,12 +2259,20 @@ def api_complex_delete(complex_id: int):
         return jsonify({"error": "login_required"}), 401
     with get_db() as con:
         with con.cursor() as cur:
+            # Проверить права до shadow fork
             cur.execute(
-                "DELETE FROM complexes WHERE id = %s AND user_id = %s RETURNING id",
+                "SELECT id FROM complexes WHERE id = %s AND user_id = %s",
                 (complex_id, g.user["id"]),
             )
             if not cur.fetchone():
                 return jsonify({"error": "not found or forbidden"}), 404
+        # Shadow fork: заморозить для зависимых пользователей до удаления
+        _create_shadow_fork(con, complex_id, "deleted")
+        with con.cursor() as cur:
+            cur.execute(
+                "DELETE FROM complexes WHERE id = %s AND user_id = %s",
+                (complex_id, g.user["id"]),
+            )
         con.commit()
     return jsonify({"ok": True})
 
@@ -1495,17 +2298,39 @@ def api_complex_members(complex_id: int):
                     ORDER BY label
                 """, (complex_id,))
                 rows = cur.fetchall()
+        trans = getattr(g, "content_trans", {})
         result = []
         for row in rows:
             row = dict(row)
             for f in ('workers', 'electricity_kw', 'efficiency', 'count'):
-                if row[f] is not None and isinstance(row[f], decimal.Decimal):
+                if row.get(f) is not None and isinstance(row[f], decimal.Decimal):
                     row[f] = float(row[f])
+            # Перевести имя машины/комплекса на язык пользователя
+            if trans and row.get("label"):
+                row["label"] = trans.get(row["label"], row["label"])
             result.append(row)
         return jsonify(result)
     except Exception as e:
         import traceback
-        return jsonify({"error": repr(e), "detail": traceback.format_exc()}), 500
+        app.logger.error("api_complex_members(%s) failed: %s", complex_id, traceback.format_exc())
+        return jsonify({"error": repr(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────
+# Debug: клиентский трейс (только в dev-режиме, app.debug=True)
+# ─────────────────────────────────────────────────────────────────
+
+_DEBUG_LOG_PATH = os.path.join(os.path.dirname(__file__), "editor_debug.log")
+
+@app.route("/api/debug/log", methods=["POST"])
+def api_debug_log():
+    if not app.debug:
+        return jsonify({"error": "debug only"}), 403
+    entry = request.get_json(silent=True) or {}
+    line = json.dumps(entry, ensure_ascii=False)
+    with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+    return jsonify({"ok": True})
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -1565,6 +2390,56 @@ def cleanup_guests(months: int, dry_run: bool) -> None:
                f"{'...' if len(deleted_ids) > 10 else ''}")
 
 
+@app.cli.command("cleanup-ghosts")
+@click.option("--dry-run", is_flag=True,
+              help="Показать сколько будет удалено, но не удалять.")
+def cleanup_ghosts(dry_run: bool) -> None:
+    """Удаляет ghost-комплексы (shadow fork), у которых не осталось зависимостей.
+
+    Запустить вручную:
+        flask cleanup-ghosts
+        flask cleanup-ghosts --dry-run
+
+    В cron (каждую ночь в 4:00):
+        0 4 * * *  cd /app && flask cleanup-ghosts >> /var/log/coi_cleanup.log 2>&1
+    """
+    sql_count = """
+        SELECT COUNT(*) FROM complexes
+        WHERE is_ghost = TRUE
+          AND NOT EXISTS (
+              SELECT 1 FROM complex_members cm WHERE cm.child_complex_id = complexes.id
+          )
+    """
+    sql_delete = """
+        DELETE FROM complexes
+        WHERE is_ghost = TRUE
+          AND NOT EXISTS (
+              SELECT 1 FROM complex_members cm WHERE cm.child_complex_id = complexes.id
+          )
+        RETURNING id
+    """
+    with get_db() as con:
+        with con.cursor() as cur:
+            cur.execute(sql_count)
+            count = cur.fetchone()[0]
+
+        if dry_run:
+            click.echo(f"[dry-run] Осиротевших ghost-комплексов к удалению: {count}")
+            return
+
+        if count == 0:
+            click.echo("Нет осиротевших ghost-комплексов. Ничего не удалено.")
+            return
+
+        with con.cursor() as cur:
+            cur.execute(sql_delete)
+            deleted_ids = [r[0] for r in cur.fetchall()]
+        con.commit()
+
+    click.echo(f"Удалено {len(deleted_ids)} ghost-комплексов. "
+               f"IDs: {deleted_ids[:10]}{'...' if len(deleted_ids) > 10 else ''}")
+
+
 # ─────────────────────────────────────────────────────────────────
 # Запуск
 # ─────────────────────────────────────────────────────────────────
@@ -1573,4 +2448,4 @@ if __name__ == "__main__":
     import glob
     # Следим за .json файлами переводов — при изменении dev-сервер перезапустится
     extra = glob.glob(os.path.join(_i18n_dir, "*.json"))
-    app.run(debug=True, port=5001, extra_files=extra)
+    app.run(debug=True, port=5001, threaded=True, extra_files=extra)

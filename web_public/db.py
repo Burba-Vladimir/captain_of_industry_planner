@@ -1,14 +1,19 @@
 """
 Подключение к базе данных.
 DATABASE_URL берётся из переменной окружения (или .env).
+
+Использует ThreadedConnectionPool: соединения создаются один раз и переиспользуются.
+Максимум 10 одновременных соединений; каждое открывается с connect_timeout=5с.
 """
 from __future__ import annotations
 
 import contextlib
 import os
+import threading
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 
 
 def _db_config() -> dict:
@@ -25,14 +30,52 @@ def _db_config() -> dict:
     }
 
 
+# ─── Пул соединений ──────────────────────────────────────────────────────────
+# Инициализируется при первом обращении (lazy), потокобезопасен.
+# minconn=2  — всегда держим 2 соединения открытыми.
+# maxconn=10 — не создаём больше 10 одновременно (защита от connection storm).
+
+_pool: psycopg2.pool.ThreadedConnectionPool | None = None
+_pool_lock = threading.Lock()
+
+
+def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
+    global _pool
+    if _pool is not None:
+        return _pool
+    with _pool_lock:
+        if _pool is not None:   # повторная проверка после захвата блокировки
+            return _pool
+        config = _db_config()
+        # connect_timeout=5 — подключение не будет висеть дольше 5 секунд
+        if "dsn" in config:
+            # DSN-формат: добавляем параметр в строку
+            sep = "&" if "?" in config["dsn"] else "?"
+            config["dsn"] = config["dsn"] + sep + "connect_timeout=5"
+        else:
+            config["connect_timeout"] = 5
+        _pool = psycopg2.pool.ThreadedConnectionPool(
+            minconn=2,
+            maxconn=10,
+            **config,
+        )
+    return _pool
+
+
 @contextlib.contextmanager
 def get_db():
-    """Контекстный менеджер: открывает соединение, закрывает при выходе."""
-    con = psycopg2.connect(**_db_config())
+    """Контекстный менеджер: берёт соединение из пула, возвращает при выходе.
+    При ошибке делает rollback перед возвратом в пул.
+    """
+    pool = _get_pool()
+    con = pool.getconn()
     try:
         yield con
+    except Exception:
+        con.rollback()
+        raise
     finally:
-        con.close()
+        pool.putconn(con)
 
 
 def dict_cursor(con):
