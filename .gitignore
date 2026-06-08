@@ -58,3 +58,23 @@ coverage.xml
 test-results/
 playwright-report/
 pending_update.sql
+
+# Local-only: not for GitHub
+web/
+sql/
+archive/
+backfill_wiki_ids.py
+buildings.json
+coi_diff.py
+coi_fixes.json
+coi_parser.py
+contracts.json
+items.json
+populate_translations.py
+recipes.json
+run_apply.bat
+run_update.bat
+translations_manual.tsv
+
+# Temp inside web_public
+web_public/_temp/
