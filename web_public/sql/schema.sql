@@ -371,14 +371,18 @@ CREATE TABLE IF NOT EXISTS user_recipe_prefs (
 -- ─────────────────────────────────────────────────────────────────────────────
 
 ALTER TABLE complexes
-    ADD COLUMN IF NOT EXISTS user_id        INT        REFERENCES users(id) ON DELETE SET NULL,
-    ADD COLUMN IF NOT EXISTS visibility     TEXT       NOT NULL DEFAULT 'private'
+    ADD COLUMN IF NOT EXISTS user_id          INT        REFERENCES users(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS visibility       TEXT       NOT NULL DEFAULT 'private'
         CHECK (visibility IN ('private', 'public')),
-    ADD COLUMN IF NOT EXISTS forked_from_id INT        REFERENCES complexes(id) ON DELETE SET NULL,
-    ADD COLUMN IF NOT EXISTS slug           UUID       NOT NULL DEFAULT gen_random_uuid(),
-    ADD COLUMN IF NOT EXISTS likes_count    INT        NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS creator_ip     INET,
-    ADD COLUMN IF NOT EXISTS fp_token       TEXT;
+    ADD COLUMN IF NOT EXISTS forked_from_id   INT        REFERENCES complexes(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS slug             UUID       NOT NULL DEFAULT gen_random_uuid(),
+    ADD COLUMN IF NOT EXISTS likes_count      INT        NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS creator_ip       INET,
+    ADD COLUMN IF NOT EXISTS fp_token         TEXT,
+    ADD COLUMN IF NOT EXISTS is_ghost         BOOLEAN    NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS ghost_of_id      INT        REFERENCES complexes(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS ghost_likes_count INT,
+    ADD COLUMN IF NOT EXISTS ghost_reason     TEXT;
 
 -- Индекс для быстрой проверки лимита по IP (только для гостей)
 CREATE INDEX IF NOT EXISTS idx_complexes_creator_ip
@@ -442,6 +446,36 @@ FROM recipes r
 LEFT JOIN resource_flows rf ON rf.parent_type = 0 AND rf.recipe_id = r.id
 LEFT JOIN items          i  ON i.id = rf.item_id
 GROUP BY r.id, r.machine_name, r.cycle_time_s;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 9. ПОДПИСКИ НА КОМПЛЕКСЫ СООБЩЕСТВА + GHOST-ИНДЕКСЫ
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS complex_subscriptions (
+    user_id    INTEGER NOT NULL REFERENCES users(id)     ON DELETE CASCADE,
+    complex_id INTEGER NOT NULL REFERENCES complexes(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, complex_id)
+);
+CREATE INDEX IF NOT EXISTS idx_csubscriptions_complex ON complex_subscriptions(complex_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 10. ТЕГИ ДЛЯ КОМПЛЕКСОВ
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS tags (
+    id   SERIAL      PRIMARY KEY,
+    name VARCHAR(30) UNIQUE NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tags_name_prefix ON tags(name text_pattern_ops);
+
+CREATE TABLE IF NOT EXISTS complex_tags (
+    complex_id INTEGER NOT NULL REFERENCES complexes(id) ON DELETE CASCADE,
+    tag_id     INTEGER NOT NULL REFERENCES tags(id)      ON DELETE CASCADE,
+    PRIMARY KEY (complex_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS idx_complex_tags_tag     ON complex_tags(tag_id);
+CREATE INDEX IF NOT EXISTS idx_complex_tags_complex ON complex_tags(complex_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 
