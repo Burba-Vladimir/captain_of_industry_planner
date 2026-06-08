@@ -60,9 +60,9 @@ playwright-report/
 pending_update.sql
 
 # Local-only: not for GitHub
-web/
-sql/
-archive/
+/web/
+/sql/
+/archive/
 backfill_wiki_ids.py
 buildings.json
 coi_diff.py
