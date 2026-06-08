@@ -15,11 +15,14 @@ import functools
 import json
 import os
 import re
+import traceback
 import uuid as _uuid
 
 from dotenv import load_dotenv
 load_dotenv()  # загрузить .env до инициализации Flask
 
+
+_MNT_TIER_RE = re.compile(r'(\d+)$')
 
 # ─────────────────────────────────────────────────────────────────
 # Парсер поисковых запросов
@@ -309,6 +312,10 @@ GUEST_COOKIE      = "coi_guest"
 GUEST_COOKIE_AGE  = 365 * 24 * 3600  # 1 год
 
 
+def _err500(e: Exception):
+    return jsonify({"error": repr(e), "detail": traceback.format_exc()}), 500
+
+
 # ─────────────────────────────────────────────────────────────────
 # Before-request: загрузить пользователя + язык
 # ─────────────────────────────────────────────────────────────────
@@ -548,7 +555,13 @@ def batch_hidden():
 # Объединённый запрос рецептов + комплексов
 # ─────────────────────────────────────────────────────────────────
 
-NODES_SQL = """\
+def _make_nodes_sql(user_id: int) -> tuple[str, tuple]:
+    """SQL для рецептов + своих/подписанных комплексов текущего пользователя.
+
+    Комплексы фильтруются на уровне БД: только собственные и подписанные.
+    Поле _subscribed=True означает «чужой, но подписан».
+    """
+    sql = """\
 SELECT * FROM (
 
     SELECT
@@ -566,7 +579,8 @@ SELECT * FROM (
         NULL::uuid      AS slug,
         NULL::integer   AS owner_id,
         NULL::text      AS visibility,
-        NULL::json      AS tags
+        NULL::json      AS tags,
+        FALSE           AS _subscribed
 
     FROM recipes r
     LEFT JOIN buildings b ON b.id = r.machine_id
@@ -615,21 +629,22 @@ SELECT * FROM (
     UNION ALL
 
     SELECT
-        'complex'                       AS node_type,
-        c.id                            AS node_id,
-        c.name                          AS name,
-        NULL                            AS machine_name,
-        NULL                            AS cycle_time_s,
-        c.total_workers                 AS workers,
-        c.total_electricity_kw          AS electricity_kw,
-        FALSE                           AS deprecated,
-        inp.items                       AS inputs,
-        out.items                       AS outputs,
-        mnt_cx.items                    AS maintenance,
-        c.slug                          AS slug,
-        c.user_id                       AS owner_id,
-        c.visibility::text              AS visibility,
-        cx_tags.tags                    AS tags
+        'complex'                               AS node_type,
+        c.id                                    AS node_id,
+        c.name                                  AS name,
+        NULL                                    AS machine_name,
+        NULL                                    AS cycle_time_s,
+        c.total_workers                         AS workers,
+        c.total_electricity_kw                  AS electricity_kw,
+        FALSE                                   AS deprecated,
+        inp.items                               AS inputs,
+        out.items                               AS outputs,
+        mnt_cx.items                            AS maintenance,
+        c.slug                                  AS slug,
+        c.user_id                               AS owner_id,
+        c.visibility::text                      AS visibility,
+        cx_tags.tags                            AS tags,
+        (c.user_id IS DISTINCT FROM %s)         AS _subscribed
 
     FROM complexes c
 
@@ -674,10 +689,18 @@ SELECT * FROM (
     ) cx_tags ON TRUE
 
     WHERE c.is_ghost = FALSE
+      AND (
+          c.user_id = %s
+          OR EXISTS (
+              SELECT 1 FROM complex_subscriptions cs
+              WHERE cs.complex_id = c.id AND cs.user_id = %s
+          )
+      )
 
 ) _nodes
 ORDER BY COALESCE(machine_name, name)
 """
+    return sql, (user_id, user_id, user_id)
 
 
 @functools.lru_cache(maxsize=8)
@@ -881,7 +904,7 @@ def _mnt_priority(maintenance: list) -> float:
     if not maintenance:
         return 0.0
     def tier(s):
-        m = re.search(r'(\d+)$', s)
+        m = _MNT_TIER_RE.search(s)
         return int(m.group(1)) if m else 1
     top = max(maintenance, key=lambda e: tier(e.get('item', '')))
     return tier(top.get('item', '')) * 100000 + float(top.get('rate_per_min') or 0)
@@ -900,42 +923,19 @@ def api_nodes():
 
     hidden_ids: set[int] = _get_hidden_recipe_ids(g.user["id"])
 
-    # Подписанные комплексы текущего пользователя (только публичные, не ghost)
-    subscribed_ids: set[int] = set()
-    if not g.user.get("is_guest"):
-        try:
-            with get_db() as con:
-                with con.cursor() as cur:
-                    cur.execute("""
-                        SELECT cs.complex_id
-                        FROM complex_subscriptions cs
-                        JOIN complexes c ON c.id = cs.complex_id
-                        WHERE cs.user_id = %s AND c.visibility = 'public' AND c.is_ghost = FALSE
-                    """, (g.user["id"],))
-                    subscribed_ids = {r[0] for r in cur.fetchall()}
-        except Exception:
-            pass
-
+    nodes_sql, nodes_params = _make_nodes_sql(g.user["id"])
     try:
         with get_db() as con:
             with dict_cursor(con) as cur:
-                cur.execute(NODES_SQL)
+                cur.execute(nodes_sql, nodes_params)
                 rows = [_parse_row(r) for r in cur.fetchall()]
     except Exception as e:
-        import traceback
-        return jsonify({"error": repr(e), "detail": traceback.format_exc()}), 500
+        return _err500(e)
 
     result = []
     for row in rows:
         if type_filter != "all" and row["node_type"] != type_filter:
             continue
-        if row["node_type"] == "complex":
-            if row["owner_id"] == g.user["id"]:
-                row["_subscribed"] = False
-            elif row["node_id"] in subscribed_ids:
-                row["_subscribed"] = True
-            else:
-                continue
         if row["node_type"] == "recipe":
             row["deprecated"] = row["node_id"] in hidden_ids
         if not show_hidden and row["deprecated"]:
@@ -1037,8 +1037,7 @@ def api_nodes_for_resource():
                     cur.execute(community_sql, (rf_dir, item))
                     rows = cur.fetchall()
         except Exception as e:
-            import traceback
-            return jsonify({"error": repr(e), "detail": traceback.format_exc()}), 500
+            return _err500(e)
 
         result = []
         for r in rows:
@@ -1052,29 +1051,14 @@ def api_nodes_for_resource():
     # ── Обычный режим: свои рецепты + свои комплексы + подписки ──
     hidden_ids: set[int] = _get_hidden_recipe_ids(g.user["id"])
 
-    # Подписанные публичные комплексы (не ghost) — появляются как свои в пикере
-    subscribed_ids: set[int] = set()
-    if not g.user.get("is_guest"):
-        try:
-            with get_db() as con:
-                with con.cursor() as cur:
-                    cur.execute("""
-                        SELECT cs.complex_id FROM complex_subscriptions cs
-                        JOIN complexes c ON c.id = cs.complex_id
-                        WHERE cs.user_id = %s AND c.visibility = 'public' AND c.is_ghost = FALSE
-                    """, (g.user["id"],))
-                    subscribed_ids = {r[0] for r in cur.fetchall()}
-        except Exception:
-            pass
-
+    nodes_sql, nodes_params = _make_nodes_sql(g.user["id"])
     try:
         with get_db() as con:
             with dict_cursor(con) as cur:
-                cur.execute(NODES_SQL)
+                cur.execute(nodes_sql, nodes_params)
                 rows = [_parse_row(r) for r in cur.fetchall()]
     except Exception as e:
-        import traceback
-        return jsonify({"error": repr(e), "detail": traceback.format_exc()}), 500
+        return _err500(e)
 
     result = []
     for row in rows:
@@ -1085,13 +1069,6 @@ def api_nodes_for_resource():
                 continue
         if type_flt != "all" and row["node_type"] != type_flt:
             continue
-        # Для обычного режима — свои комплексы + подписанные
-        if row["node_type"] == "complex":
-            is_own        = row["owner_id"] == g.user["id"]
-            is_subscribed = row["node_id"] in subscribed_ids
-            if not is_own and not is_subscribed:
-                continue
-            row["_subscribed"] = is_subscribed and not is_own
         check = row["outputs"] if direction == "produces" else row["inputs"]
         if any((x.get("item_en") or x["item"]) == item for x in check):
             result.append(row)
@@ -1103,10 +1080,11 @@ def api_nodes_for_resource():
 def api_node_detail(node_type: str, node_id: int):
     if node_type not in ("recipe", "complex"):
         return jsonify({"error": "invalid type"}), 400
+    nodes_sql, nodes_params = _make_nodes_sql(g.user["id"])
     try:
         with get_db() as con:
             with dict_cursor(con) as cur:
-                cur.execute(NODES_SQL)
+                cur.execute(nodes_sql, nodes_params)
                 rows = [_parse_row(r) for r in cur.fetchall()]
         row = next(
             (r for r in rows if r["node_type"] == node_type and r["node_id"] == node_id),
@@ -1116,8 +1094,7 @@ def api_node_detail(node_type: str, node_id: int):
             return jsonify({"error": "not found"}), 404
         return jsonify(row)
     except Exception as e:
-        import traceback
-        return jsonify({"error": repr(e), "detail": traceback.format_exc()}), 500
+        return _err500(e)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -1143,9 +1120,8 @@ def api_public_complexes():
 
     ast = _parse_search(q) if q.strip() else None
     filter_params: list = []
-    count_params:  list = []
     where_frag, needs_users = _build_community_where(ast, filter_params, trans_rev)
-    _build_community_where(ast, count_params, trans_rev)   # отдельный список для COUNT
+    count_params = list(filter_params)
 
     extra_where = f" AND {where_frag}" if ast else ""
     count_join  = "LEFT JOIN users u ON u.id = c.user_id" if needs_users else ""
@@ -1667,8 +1643,7 @@ def api_complex_fork(complex_id: int):
                 new_slug = str(cur.fetchone()[0])
             con.commit()
     except Exception as e:
-        import traceback
-        return jsonify({"error": repr(e), "detail": traceback.format_exc()}), 500
+        return _err500(e)
 
     return jsonify({"ok": True, "id": new_id, "slug": new_slug}), 201
 
@@ -1947,8 +1922,7 @@ def api_complex_graph(complex_id: int):
             "edges":          edges,
         })
     except Exception as e:
-        import traceback
-        return jsonify({"error": repr(e), "detail": traceback.format_exc()}), 500
+        return _err500(e)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -2108,25 +2082,15 @@ def api_tags():
     q = re.sub(r'[^\w\-]', '', request.args.get("q", "").strip().lower())
     with get_db() as con:
         with con.cursor() as cur:
-            if q:
-                cur.execute("""
-                    SELECT t.name, COUNT(ct.complex_id) AS usage
-                    FROM tags t
-                    LEFT JOIN complex_tags ct ON ct.tag_id = t.id
-                    WHERE t.name LIKE %s
-                    GROUP BY t.name
-                    ORDER BY usage DESC, t.name
-                    LIMIT 10
-                """, (q + "%",))
-            else:
-                cur.execute("""
-                    SELECT t.name, COUNT(ct.complex_id) AS usage
-                    FROM tags t
-                    LEFT JOIN complex_tags ct ON ct.tag_id = t.id
-                    GROUP BY t.name
-                    ORDER BY usage DESC, t.name
-                    LIMIT 10
-                """)
+            cur.execute("""
+                SELECT t.name, COUNT(ct.complex_id) AS usage
+                FROM tags t
+                LEFT JOIN complex_tags ct ON ct.tag_id = t.id
+                WHERE (%s = '' OR t.name LIKE %s)
+                GROUP BY t.name
+                ORDER BY usage DESC, t.name
+                LIMIT 10
+            """, (q, q + "%"))
             return jsonify([{"name": r[0]} for r in cur.fetchall()])
 
 
@@ -2136,62 +2100,53 @@ def api_complex_create():
     user      = g.user
     is_guest  = user.get("is_guest", False)
     client_ip = get_remote_address()
-    fp_token  = (request.get_json(silent=True) or {}).get("fp_token") or \
-                request.headers.get("X-FP-Token")
+    data      = request.get_json(silent=True) or {}
+    fp_token  = data.get("fp_token") or request.headers.get("X-FP-Token")
 
-    # ── Аварийный клапан: глобальный лимит гостевых комплексов ──
+    # ── Лимиты для гостей (один блок соединения) ────────────────
     if is_guest:
         with get_db() as con:
             with con.cursor() as cur:
                 cur.execute("""
                     SELECT COUNT(*) FROM complexes c
-                    JOIN users u ON u.id = c.user_id
-                    WHERE u.is_guest = TRUE
+                    JOIN users u ON u.id = c.user_id WHERE u.is_guest = TRUE
                 """)
                 if cur.fetchone()[0] >= GUEST_GLOBAL_CAP:
                     return jsonify({
                         "error":   "service_overload",
                         "message": "Guest complex limit reached globally. Please sign in to continue.",
                     }), 503
-
-    # ── Лимит по IP (для гостей) ────────────────────────────────
-    if is_guest and client_ip:
-        with get_db() as con:
-            with con.cursor() as cur:
-                cur.execute("""
-                    SELECT COUNT(*) FROM complexes c
-                    JOIN users u ON u.id = c.user_id
-                    WHERE u.is_guest = TRUE
-                      AND c.creator_ip = %s::inet
-                      AND c.created_at > NOW() - INTERVAL '30 days'
-                """, (client_ip,))
-                if cur.fetchone()[0] >= GUEST_MAX_PER_IP:
-                    return jsonify({
-                        "error":   "guest_ip_limit",
-                        "limit":   GUEST_MAX_PER_IP,
-                        "message": f"Maximum {GUEST_MAX_PER_IP} guest complexes per IP per 30 days. Sign in to create more.",
-                    }), 403
-
-    # ── Лимит по fingerprint (для гостей) ───────────────────────
-    if is_guest and fp_token:
-        with get_db() as con:
-            with con.cursor() as cur:
-                cur.execute("""
-                    SELECT COUNT(*) FROM complexes c
-                    JOIN users u ON u.id = c.user_id
-                    WHERE u.is_guest = TRUE
-                      AND c.fp_token = %s
-                      AND c.created_at > NOW() - INTERVAL '30 days'
-                """, (fp_token,))
-                if cur.fetchone()[0] >= GUEST_MAX_PER_FP:
-                    return jsonify({
-                        "error":   "guest_fp_limit",
-                        "limit":   GUEST_MAX_PER_FP,
-                        "message": f"Maximum {GUEST_MAX_PER_FP} guest complexes per browser per 30 days. Sign in to create more.",
-                    }), 403
+                if client_ip:
+                    cur.execute("""
+                        SELECT COUNT(*) FROM complexes c
+                        JOIN users u ON u.id = c.user_id
+                        WHERE u.is_guest = TRUE
+                          AND c.creator_ip = %s::inet
+                          AND c.created_at > NOW() - INTERVAL '30 days'
+                    """, (client_ip,))
+                    if cur.fetchone()[0] >= GUEST_MAX_PER_IP:
+                        return jsonify({
+                            "error":   "guest_ip_limit",
+                            "limit":   GUEST_MAX_PER_IP,
+                            "message": f"Maximum {GUEST_MAX_PER_IP} guest complexes per IP per 30 days. Sign in to create more.",
+                        }), 403
+                if fp_token:
+                    cur.execute("""
+                        SELECT COUNT(*) FROM complexes c
+                        JOIN users u ON u.id = c.user_id
+                        WHERE u.is_guest = TRUE
+                          AND c.fp_token = %s
+                          AND c.created_at > NOW() - INTERVAL '30 days'
+                    """, (fp_token,))
+                    if cur.fetchone()[0] >= GUEST_MAX_PER_FP:
+                        return jsonify({
+                            "error":   "guest_fp_limit",
+                            "limit":   GUEST_MAX_PER_FP,
+                            "message": f"Maximum {GUEST_MAX_PER_FP} guest complexes per browser per 30 days. Sign in to create more.",
+                        }), 403
 
     # ── Лимит залогиненных (premium без ограничений) ────────────
-    if not user.get("is_premium") and not is_guest:
+    elif not user.get("is_premium"):
         with get_db() as con:
             with con.cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM complexes WHERE user_id = %s", (user["id"],))
@@ -2201,8 +2156,6 @@ def api_complex_create():
                         "limit":   MAX_COMPLEXES,
                         "message": f"Maximum {MAX_COMPLEXES} complexes per account. Delete old ones to create new.",
                     }), 403
-
-    data = request.get_json(silent=True) or {}
     # Записываем IP и fp_token для anti-abuse
     data["_creator_ip"] = client_ip
     data["_fp_token"]   = fp_token
@@ -2223,8 +2176,7 @@ def api_complex_create():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
-        import traceback
-        return jsonify({"error": repr(e), "detail": traceback.format_exc()}), 500
+        return _err500(e)
 
 
 @app.route("/api/complex/<int:complex_id>", methods=["PUT"])
@@ -2249,8 +2201,7 @@ def api_complex_update(complex_id: int):
         code = 403 if isinstance(e, PermissionError) else 400
         return jsonify({"error": str(e)}), code
     except Exception as e:
-        import traceback
-        return jsonify({"error": repr(e), "detail": traceback.format_exc()}), 500
+        return _err500(e)
 
 
 @app.route("/api/complex/<int:complex_id>", methods=["DELETE"])
@@ -2311,16 +2262,15 @@ def api_complex_members(complex_id: int):
             result.append(row)
         return jsonify(result)
     except Exception as e:
-        import traceback
-        app.logger.error("api_complex_members(%s) failed: %s", complex_id, traceback.format_exc())
-        return jsonify({"error": repr(e)}), 500
+        return _err500(e)
 
 
 # ─────────────────────────────────────────────────────────────────
 # Debug: клиентский трейс (только в dev-режиме, app.debug=True)
 # ─────────────────────────────────────────────────────────────────
 
-_DEBUG_LOG_PATH = os.path.join(os.path.dirname(__file__), "editor_debug.log")
+_LOG_DIR        = os.environ.get("LOG_DIR", os.path.dirname(__file__))
+_DEBUG_LOG_PATH = os.path.join(_LOG_DIR, "editor_debug.log")
 
 @app.route("/api/debug/log", methods=["POST"])
 def api_debug_log():
@@ -2339,6 +2289,27 @@ def api_debug_log():
 
 import click
 
+
+def _run_cleanup(sql_count: str, sql_delete: str, params: tuple,
+                 dry_run: bool, dry_msg: str, empty_msg: str) -> list | None:
+    """Count → dry-run check → delete → commit. Returns deleted IDs, [] if nothing, None if dry-run."""
+    with get_db() as con:
+        with con.cursor() as cur:
+            cur.execute(sql_count, params)
+            count = cur.fetchone()[0]
+        if dry_run:
+            click.echo(dry_msg.format(count=count))
+            return None
+        if count == 0:
+            click.echo(empty_msg)
+            return []
+        with con.cursor() as cur:
+            cur.execute(sql_delete, params)
+            deleted_ids = [r[0] for r in cur.fetchall()]
+        con.commit()
+    return deleted_ids
+
+
 @app.cli.command("cleanup-guests")
 @click.option("--months", default=6, show_default=True,
               help="Удалить гостей без активности дольше N месяцев.")
@@ -2355,39 +2326,18 @@ def cleanup_guests(months: int, dry_run: bool) -> None:
     Пример cron (каждое воскресенье в 3:00):
         0 3 * * 0  cd /app && flask cleanup-guests >> /var/log/coi_cleanup.log 2>&1
     """
-    sql_count = """
-        SELECT COUNT(*) FROM users
-        WHERE  is_guest = TRUE
-          AND  last_seen_at < NOW() - (%s || ' months')::INTERVAL
-    """
-    sql_delete = """
-        DELETE FROM users
-        WHERE  is_guest = TRUE
-          AND  last_seen_at < NOW() - (%s || ' months')::INTERVAL
-        RETURNING id
-    """
-    with get_db() as con:
-        with con.cursor() as cur:
-            cur.execute(sql_count, (str(months),))
-            count = cur.fetchone()[0]
-
-        if dry_run:
-            click.echo(f"[dry-run] Будет удалено {count} гостевых аккаунтов "
-                       f"без активности >{months} мес.")
-            return
-
-        if count == 0:
-            click.echo(f"Нет гостей без активности >{months} мес. Ничего не удалено.")
-            return
-
-        with con.cursor() as cur:
-            cur.execute(sql_delete, (str(months),))
-            deleted_ids = [r[0] for r in cur.fetchall()]
-        con.commit()
-
-    click.echo(f"Удалено {len(deleted_ids)} гостевых аккаунтов "
-               f"(inactive >{months} мес.). IDs: {deleted_ids[:10]}"
-               f"{'...' if len(deleted_ids) > 10 else ''}")
+    where = "WHERE is_guest = TRUE AND last_seen_at < NOW() - (%s || ' months')::INTERVAL"
+    deleted_ids = _run_cleanup(
+        sql_count  = f"SELECT COUNT(*) FROM users {where}",
+        sql_delete = f"DELETE FROM users {where} RETURNING id",
+        params     = (str(months),),
+        dry_run    = dry_run,
+        dry_msg    = f"[dry-run] Будет удалено {{count}} гостевых аккаунтов без активности >{months} мес.",
+        empty_msg  = f"Нет гостей без активности >{months} мес. Ничего не удалено.",
+    )
+    if deleted_ids is not None:
+        click.echo(f"Удалено {len(deleted_ids)} гостевых аккаунтов (inactive >{months} мес.). "
+                   f"IDs: {deleted_ids[:10]}{'...' if len(deleted_ids) > 10 else ''}")
 
 
 @app.cli.command("cleanup-ghosts")
@@ -2403,41 +2353,22 @@ def cleanup_ghosts(dry_run: bool) -> None:
     В cron (каждую ночь в 4:00):
         0 4 * * *  cd /app && flask cleanup-ghosts >> /var/log/coi_cleanup.log 2>&1
     """
-    sql_count = """
-        SELECT COUNT(*) FROM complexes
+    where = """
         WHERE is_ghost = TRUE
           AND NOT EXISTS (
               SELECT 1 FROM complex_members cm WHERE cm.child_complex_id = complexes.id
-          )
-    """
-    sql_delete = """
-        DELETE FROM complexes
-        WHERE is_ghost = TRUE
-          AND NOT EXISTS (
-              SELECT 1 FROM complex_members cm WHERE cm.child_complex_id = complexes.id
-          )
-        RETURNING id
-    """
-    with get_db() as con:
-        with con.cursor() as cur:
-            cur.execute(sql_count)
-            count = cur.fetchone()[0]
-
-        if dry_run:
-            click.echo(f"[dry-run] Осиротевших ghost-комплексов к удалению: {count}")
-            return
-
-        if count == 0:
-            click.echo("Нет осиротевших ghost-комплексов. Ничего не удалено.")
-            return
-
-        with con.cursor() as cur:
-            cur.execute(sql_delete)
-            deleted_ids = [r[0] for r in cur.fetchall()]
-        con.commit()
-
-    click.echo(f"Удалено {len(deleted_ids)} ghost-комплексов. "
-               f"IDs: {deleted_ids[:10]}{'...' if len(deleted_ids) > 10 else ''}")
+          )"""
+    deleted_ids = _run_cleanup(
+        sql_count  = f"SELECT COUNT(*) FROM complexes {where}",
+        sql_delete = f"DELETE FROM complexes {where} RETURNING id",
+        params     = (),
+        dry_run    = dry_run,
+        dry_msg    = "[dry-run] Осиротевших ghost-комплексов к удалению: {count}",
+        empty_msg  = "Нет осиротевших ghost-комплексов. Ничего не удалено.",
+    )
+    if deleted_ids is not None:
+        click.echo(f"Удалено {len(deleted_ids)} ghost-комплексов. "
+                   f"IDs: {deleted_ids[:10]}{'...' if len(deleted_ids) > 10 else ''}")
 
 
 # ─────────────────────────────────────────────────────────────────

@@ -141,26 +141,7 @@ def seed_game_data(db_conn):
         cur.execute("DELETE FROM buildings WHERE id = 9001")
 
 
-SEED_RECIPE_ID = 9001  # id из seed_game_data
-
-
-def make_complex_payload(name="Test Complex", recipe_id=SEED_RECIPE_ID):
-    """Минимальный payload для создания комплекса через API."""
-    return {
-        "name": name,
-        "nodes": [
-            {
-                "_id": "node-1",
-                "node_type": "recipe",
-                "node_ref_id": recipe_id,
-                "count": 1,
-                "pos_x": 100,
-                "pos_y": 100,
-                "efficiency": 1.0,
-            }
-        ],
-        "edges": [],
-    }
+from tests.helpers import SEED_RECIPE_ID, make_complex_payload  # noqa: F401
 
 
 # ─── Публичный комплекс для тестов Community ─────────────────────────────────

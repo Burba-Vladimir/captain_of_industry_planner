@@ -19,8 +19,9 @@ from functools import wraps
 
 import requests
 from authlib.integrations.flask_client import OAuth
-from flask import (Blueprint, abort, g, jsonify, redirect,
-                   request, session, url_for)
+from flask import (Blueprint, abort, g, jsonify, make_response,
+                   redirect, request, session, url_for)
+from urllib.parse import urlencode
 
 from db import get_db
 
@@ -73,6 +74,7 @@ def _load_user_from_session():
     if not user_id:
         g.user = None
         return
+    update_seen = not session.get("_seen_updated")
     with get_db() as con:
         with con.cursor() as cur:
             cur.execute(
@@ -81,17 +83,14 @@ def _load_user_from_session():
                 (user_id,),
             )
             row = cur.fetchone()
+            if row and update_seen:
+                cur.execute(
+                    "UPDATE users SET last_seen_at = NOW() WHERE id = %s", (user_id,)
+                )
+                con.commit()
+                session["_seen_updated"] = True
     if row:
         g.user = _row_to_user(row)
-        # Обновить last_seen_at раз в сессию
-        if not session.get("_seen_updated"):
-            with get_db() as con:
-                with con.cursor() as cur:
-                    cur.execute(
-                        "UPDATE users SET last_seen_at = NOW() WHERE id = %s", (user_id,)
-                    )
-                con.commit()
-            session["_seen_updated"] = True
     else:
         g.user = None
         session.clear()
@@ -217,8 +216,7 @@ def steam_login():
         "openid.identity":   "http://specs.openid.net/auth/2.0/identifier_select",
         "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
     }
-    qs = "&".join(f"{k}={v}" for k, v in params.items())
-    return redirect(f"{STEAM_OPENID_URL}?{qs}")
+    return redirect(f"{STEAM_OPENID_URL}?{urlencode(params)}")
 
 
 @auth_bp.route("/steam/callback")
@@ -363,20 +361,24 @@ def _send_email(to: str, code: str) -> None:
 def _merge_guest_to_user(guest_id: int, real_id: int) -> None:
     """
     Переносит данные гостя (комплексы, скрытые рецепты) на реальный аккаунт.
+    Комплексы с конфликтующими именами переименовываются (суффикс " (imported)").
     Гостевой пользователь удаляется после переноса.
     """
     if guest_id == real_id:
         return
     with get_db() as con:
         with con.cursor() as cur:
-            # Перенести комплексы (где нет конфликта имён с существующими у real_id)
+            # Переименовать конфликтующие комплексы гостя перед переносом
             cur.execute("""
-                UPDATE complexes SET user_id = %s
+                UPDATE complexes SET name = name || ' (imported)'
                 WHERE  user_id = %s
-                  AND  name NOT IN (
-                      SELECT name FROM complexes WHERE user_id = %s
-                  )
-            """, (real_id, guest_id, real_id))
+                  AND  name IN (SELECT name FROM complexes WHERE user_id = %s)
+            """, (guest_id, real_id))
+            # Перенести все комплексы гостя
+            cur.execute(
+                "UPDATE complexes SET user_id = %s WHERE user_id = %s",
+                (real_id, guest_id),
+            )
             # Скопировать скрытые рецепты (игнорировать дубликаты)
             cur.execute("""
                 INSERT INTO user_recipe_prefs (user_id, recipe_id, hidden)
@@ -473,13 +475,16 @@ def email_verify():
 
     # Merge гостя если был
     guest_user = g.get("user")
-    if guest_user and guest_user.get("is_guest"):
+    was_guest = guest_user and guest_user.get("is_guest")
+    if was_guest:
         _merge_guest_to_user(guest_user["id"], user_id)
-        # Сбросить гостевой cookie
         session.pop("_seen_updated", None)
 
     session["user_id"] = user_id
-    return jsonify({"ok": True})
+    resp = make_response(jsonify({"ok": True}))
+    if was_guest:
+        resp.delete_cookie("coi_guest")
+    return resp
 
 
 # ─────────────────────────────────────────────────────────────────
