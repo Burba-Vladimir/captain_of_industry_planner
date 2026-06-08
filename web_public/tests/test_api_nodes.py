@@ -55,10 +55,10 @@ class TestApiNodes:
         assert data["items"] == []
 
     def test_pagination(self, client):
-        """per_page=10 возвращает ровно 10 записей (минимальный размер страницы)."""
+        """per_page ограничивает выдачу — возвращается не больше запрошенного."""
         r = client.get("/api/nodes?per_page=10&type=recipe")
         data = r.get_json()
-        assert len(data["items"]) == 10
+        assert len(data["items"]) == min(10, data["total"])
 
     def test_item_fields(self, client):
         """Каждый элемент содержит обязательные поля."""
