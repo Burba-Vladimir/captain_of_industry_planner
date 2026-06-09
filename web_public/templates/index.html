@@ -1678,13 +1678,13 @@ function app() {
             shadow-lg px-4 py-3">
   <div class="max-w-4xl mx-auto flex flex-col sm:flex-row items-start sm:items-center gap-3">
     <p class="text-sm text-slate-300 flex-1 leading-relaxed">
-      This site uses a strictly necessary session cookie for login — no tracking, no advertising.
-      <a href="/privacy" class="underline text-blue-400 hover:text-blue-300 ml-1 whitespace-nowrap">Privacy Policy</a>
+      {{ t('cookie.banner_text') }}
+      <a href="/privacy" class="underline text-blue-400 hover:text-blue-300 ml-1 whitespace-nowrap">{{ t('cookie.privacy_link') }}</a>
     </p>
     <button @click="localStorage.setItem('coi_cookie_ok','1'); show=false"
             class="shrink-0 px-4 py-1.5 bg-blue-600 hover:bg-blue-500
                    text-white text-sm font-medium rounded-lg transition-colors">
-      Got it
+      {{ t('cookie.accept') }}
     </button>
   </div>
 </div>

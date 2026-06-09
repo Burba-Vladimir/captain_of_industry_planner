@@ -210,6 +210,11 @@
     "placeholder": "add tag…",
     "search_hint": "Click to filter by tag"
   },
+  "cookie": {
+    "banner_text": "This site uses a strictly necessary session cookie for login — no tracking, no advertising.",
+    "privacy_link": "Privacy Policy",
+    "accept": "Got it"
+  },
   "ghost": {
     "edited_notice": "This complex has been updated by its author.",
     "privatized_notice": "This complex is no longer public.",

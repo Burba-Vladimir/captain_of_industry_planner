@@ -1,29 +1,130 @@
 <!DOCTYPE html>
-<html lang="en"
+<html lang="{{ lang }}"
       x-data
       :class="localStorage.getItem('theme')==='light' ? 'light' : 'dark'">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% if lang == 'ru' %}
+  <title>Политика конфиденциальности — CoI Planner</title>
+  <meta name="description" content="Политика конфиденциальности CoI Planner — какие данные собираются и как используются.">
+  {% else %}
   <title>Privacy Policy — CoI Planner</title>
   <meta name="description" content="Privacy policy for CoI Planner — what data we collect and how it is used.">
+  {% endif %}
   <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
   <style>
     [x-cloak] { display: none !important; }
   </style>
 </head>
-<body class="bg-slate-900 dark:bg-slate-900 text-slate-200 dark:text-slate-200
-             min-h-screen py-10 px-4">
+<body class="bg-slate-900 text-slate-200 min-h-screen py-10 px-4">
 
   <!-- nav -->
   <div class="max-w-2xl mx-auto mb-6">
-    <a href="/" class="text-blue-400 hover:text-blue-300 text-sm">&larr; Back to CoI Planner</a>
+    <a href="/" class="text-blue-400 hover:text-blue-300 text-sm">
+      {% if lang == 'ru' %}&larr; Назад в CoI Planner{% else %}&larr; Back to CoI Planner{% endif %}
+    </a>
   </div>
 
   <!-- content -->
   <article class="max-w-2xl mx-auto prose prose-invert prose-slate prose-sm sm:prose-base">
 
+{% if lang == 'ru' %}
+    <h1 class="text-2xl font-bold mb-2">Политика конфиденциальности</h1>
+    <p class="text-slate-400 text-sm mb-8">Последнее обновление: июнь 2026</p>
+
+    <h2>Кто мы</h2>
+    <p>
+      CoI Planner — бесплатный инструмент планирования производственных комплексов
+      для игры <em>Captain of Industry</em>. Сервис поддерживается независимым разработчиком.
+      По всем вопросам пишите на
+      <a href="mailto:dogmat.igwt@gmail.com" class="text-blue-400 hover:text-blue-300">dogmat.igwt@gmail.com</a>.
+    </p>
+
+    <h2>Какие данные мы собираем</h2>
+
+    <h3>Данные аккаунта</h3>
+    <p>
+      При входе в систему мы сохраняем ваш <strong>адрес электронной почты</strong>.
+      Он используется исключительно для идентификации аккаунта и отправки одноразовых кодов входа.
+      Пароли мы не храним.
+    </p>
+
+    <h3>Созданные данные</h3>
+    <p>
+      Производственные комплексы, их названия, теги и граф сохраняются в базе данных,
+      чтобы вы могли получить к ним доступ позже. Публичные комплексы видны другим
+      пользователям; приватные — только вам.
+    </p>
+
+    <h3>IP-адрес</h3>
+    <p>
+      Ваш IP-адрес временно используется для ограничения частоты запросов (защита от злоупотреблений).
+      Он не сохраняется в базе данных и не связывается с вашим аккаунтом.
+    </p>
+
+    <h3>Сессионный cookie</h3>
+    <p>
+      Мы используем один строго необходимый HTTP-cookie для поддержания сессии входа.
+      Этот cookie содержит только непрозрачный идентификатор сессии — никаких персональных данных.
+      Он удаляется при закрытии браузера или выходе из аккаунта.
+    </p>
+
+    <h2>Чего мы НЕ собираем</h2>
+    <ul>
+      <li>Мы не используем аналитику, пиксели отслеживания или рекламные cookie.</li>
+      <li>Мы не передаём ваши данные третьим лицам.</li>
+      <li>Мы не продаём ваши данные.</li>
+    </ul>
+
+    <h2>Хранение и безопасность данных</h2>
+    <p>
+      Все данные хранятся на серверах в Европейском союзе.
+      Используя этот сервис, вы подтверждаете, что ваши данные обрабатываются на инфраструктуре ЕС.
+    </p>
+
+    <h2>Ваши права</h2>
+    <p>Вы вправе:</p>
+    <ul>
+      <li><strong>Доступ</strong> — просмотреть все свои комплексы во вкладке Browse.</li>
+      <li><strong>Удаление</strong> — удалить аккаунт и все связанные данные в любое время
+          через <em>Настройки → Удалить аккаунт</em>. Действие немедленное и необратимое.</li>
+      <li><strong>Портируемость</strong> — графы ваших комплексов доступны по API:
+          <code>/api/complex/&lt;id&gt;/graph</code>.</li>
+    </ul>
+    <p>
+      По любым другим запросам (например, выгрузка вашего email из базы данных) пишите на
+      <a href="mailto:dogmat.igwt@gmail.com" class="text-blue-400 hover:text-blue-300">dogmat.igwt@gmail.com</a>.
+    </p>
+
+    <h2>Cookie</h2>
+    <p>Сайт использует один строго необходимый cookie:</p>
+    <table>
+      <thead>
+        <tr><th>Имя</th><th>Назначение</th><th>Срок действия</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>session</code></td>
+          <td>Поддерживает вход между загрузками страниц</td>
+          <td>Сессия (очищается при выходе / закрытии браузера)</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      Аналитические, рекламные и сторонние cookie не используются.
+      Ключ localStorage (<code>coi_cookie_ok</code>) устанавливается при закрытии баннера;
+      он не покидает ваше устройство.
+    </p>
+
+    <h2>Изменения политики</h2>
+    <p>
+      При существенных изменениях мы обновим дату в верхней части этой страницы.
+      Продолжение использования сервиса после изменений означает принятие новой редакции.
+    </p>
+
+{% else %}
     <h1 class="text-2xl font-bold mb-2">Privacy Policy</h1>
     <p class="text-slate-400 text-sm mb-8">Last updated: June 2026</p>
 
@@ -92,9 +193,7 @@
     </p>
 
     <h2>Cookies</h2>
-    <p>
-      This site uses one strictly necessary cookie:
-    </p>
+    <p>This site uses one strictly necessary cookie:</p>
     <table>
       <thead>
         <tr><th>Name</th><th>Purpose</th><th>Duration</th></tr>
@@ -119,6 +218,7 @@
       Continued use of the service after changes constitutes acceptance.
     </p>
 
+{% endif %}
   </article>
 
 </body>

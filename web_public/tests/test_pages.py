@@ -29,12 +29,27 @@ class TestIndex:
 
 
 class TestPrivacy:
-    def test_privacy_ok(self, client):
+    def test_privacy_en(self, client):
         r = client.get("/privacy")
         assert r.status_code == 200
         assert b"Privacy Policy" in r.data
         assert b"cookie" in r.data.lower()
-        assert b"privacy" in r.data.lower()
+
+    def test_privacy_ru(self, client):
+        r = client.get("/privacy?lang=ru")
+        assert r.status_code == 200
+        # Russian content rendered
+        assert "Политика конфиденциальности".encode() in r.data
+        assert "cookie".encode() in r.data.lower()
+        # Banner: Russian text injected via t()
+        assert "Политика конфиденциальности".encode() in r.data
+
+    def test_cookie_banner_ru(self, client):
+        """Cookie banner text switches to Russian on index page."""
+        r = client.get("/?lang=ru")
+        assert r.status_code == 200
+        assert "Понятно".encode() in r.data
+        assert "Политика конфиденциальности".encode() in r.data
 
 
 class TestComplexRoutes:
