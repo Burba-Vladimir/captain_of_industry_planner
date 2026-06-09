@@ -106,13 +106,6 @@
               class="px-3 py-1.5 transition-colors border-l border-slate-200 dark:border-slate-600">{{ t('nav.public') }}</button>
     </div>
 
-    <!-- About link -->
-    <a href="/about"
-       class="shrink-0 px-3 py-1.5 text-sm text-slate-500 dark:text-slate-400
-              hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
-      {{ t('nav.about') }}
-    </a>
-
     <!-- Search (browse) -->
     <div class="flex-1 min-w-32 max-w-sm relative" x-show="tab==='browse'">
       <input type="search"
@@ -156,6 +149,13 @@
               class="px-2 py-1.5 transition-colors {{ 'bg-blue-600 text-white' if lang == lc else 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600' }}">{{ lname }}</button>
       {% endfor %}
     </div>
+
+    <!-- About link -->
+    <a href="/about"
+       class="shrink-0 px-3 py-1.5 text-sm text-slate-500 dark:text-slate-400
+              hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
+      {{ t('nav.about') }}
+    </a>
 
     <!-- User menu: real user → avatar+menu; guest → login button -->
     {% if user and not user.is_guest %}
