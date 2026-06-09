@@ -77,10 +77,7 @@
         ('🔍', 'Поиск рецептов', 'Все рецепты и здания игры в одной таблице. Расширенный поиск: по ресурсу, машине, тегу.'),
         ('🌐', 'Сообщество', 'Публикуйте свои комплексы и изучайте чужие. Лайки, форки, закладки.'),
         ('🏷', 'Теги', 'Помечайте комплексы тегами на любом языке, ищите по хэштегу.'),
-        ('👻', 'Снимки (Ghost)', 'Если оригинал удалён — ваши закладки сохраняют замороженную копию.'),
-        ('🌙', 'Тёмная тема', 'Светлая и тёмная тема, сохраняется между сессиями.'),
-        ('🇷🇺🇬🇧', 'RU / EN', 'Полный перевод интерфейса и игровых названий на русский язык.'),
-        ('🔒', 'Без пароля', 'Вход по одноразовому коду на email — никаких паролей.'),
+        ('🏭', 'Вложенные комплексы', 'Используйте готовый комплекс как узел внутри другого. Стройте конгломераты любой сложности из переиспользуемых блоков.'),
       ] %}
       {% else %}
       {% set features = [
@@ -89,10 +86,7 @@
         ('🔍', 'Recipe Browser', 'All game recipes and buildings in one table. Advanced search by resource, machine, or tag.'),
         ('🌐', 'Community', 'Publish your complexes and explore others. Likes, forks, bookmarks.'),
         ('🏷', 'Tags', 'Tag complexes in any language, search by hashtag.'),
-        ('👻', 'Ghost Snapshots', 'If the original is deleted, your bookmarks preserve a frozen copy.'),
-        ('🌙', 'Dark Theme', 'Light and dark theme, persisted across sessions.'),
-        ('🇷🇺🇬🇧', 'RU / EN', 'Full interface and game-name translation into Russian.'),
-        ('🔒', 'Passwordless', 'Sign in with a one-time email code — no passwords.'),
+        ('🏭', 'Nested Complexes', 'Use a finished complex as a node inside another. Build conglomerates of any depth from reusable building blocks.'),
       ] %}
       {% endif %}
 
@@ -103,6 +97,67 @@
         <p class="text-xs text-slate-400 leading-relaxed">{{ desc }}</p>
       </div>
       {% endfor %}
+
+    </div>
+  </section>
+
+  <!-- ── Roadmap ────────────────────────────────────────────────────── -->
+  <section class="max-w-4xl mx-auto px-4 pb-14">
+    <div class="border border-slate-700 rounded-2xl p-6">
+
+      {% if lang == 'ru' %}
+      <h2 class="text-lg font-bold text-white mb-1">В планах</h2>
+      <p class="text-slate-400 text-sm mb-5">Функции, которые появятся в следующих версиях.</p>
+      <ul class="space-y-3">
+        <li class="flex items-start gap-3">
+          <span class="text-xl mt-0.5">🌾</span>
+          <div>
+            <p class="text-sm font-medium text-slate-200">Рациональное планирование ферм</p>
+            <p class="text-xs text-slate-400 mt-0.5">Калькулятор оптимальной раскладки посевных площадей с учётом ирригации и типов культур.</p>
+          </div>
+        </li>
+        <li class="flex items-start gap-3">
+          <span class="text-xl mt-0.5">🏘</span>
+          <div>
+            <p class="text-sm font-medium text-slate-200">Расчёт потребностей поселения и производства Единства</p>
+            <p class="text-xs text-slate-400 mt-0.5">Сколько еды, товаров и жилья нужно для заданного числа жителей, и как это конвертируется в Единство.</p>
+          </div>
+        </li>
+        <li class="flex items-start gap-3">
+          <span class="text-xl mt-0.5">📈</span>
+          <div>
+            <p class="text-sm font-medium text-slate-200">Калькулятор торговых контрактов</p>
+            <p class="text-xs text-slate-400 mt-0.5">Оценка выгодности торговли: что продавать, что покупать, как строить производство под контракт.</p>
+          </div>
+        </li>
+      </ul>
+      {% else %}
+      <h2 class="text-lg font-bold text-white mb-1">Coming soon</h2>
+      <p class="text-slate-400 text-sm mb-5">Features planned for upcoming versions.</p>
+      <ul class="space-y-3">
+        <li class="flex items-start gap-3">
+          <span class="text-xl mt-0.5">🌾</span>
+          <div>
+            <p class="text-sm font-medium text-slate-200">Farm Planner</p>
+            <p class="text-xs text-slate-400 mt-0.5">Optimal field layout calculator accounting for irrigation and crop types.</p>
+          </div>
+        </li>
+        <li class="flex items-start gap-3">
+          <span class="text-xl mt-0.5">🏘</span>
+          <div>
+            <p class="text-sm font-medium text-slate-200">Settlement &amp; Unity Calculator</p>
+            <p class="text-xs text-slate-400 mt-0.5">How much food, goods, and housing a given population needs — and how that converts to Unity production.</p>
+          </div>
+        </li>
+        <li class="flex items-start gap-3">
+          <span class="text-xl mt-0.5">📈</span>
+          <div>
+            <p class="text-sm font-medium text-slate-200">Trade Contract Calculator</p>
+            <p class="text-xs text-slate-400 mt-0.5">Evaluate trade profitability: what to sell, what to buy, how to build production around a contract.</p>
+          </div>
+        </li>
+      </ul>
+      {% endif %}
 
     </div>
   </section>
