@@ -150,13 +150,6 @@
       {% endfor %}
     </div>
 
-    <!-- About link -->
-    <a href="/about"
-       class="shrink-0 px-3 py-1.5 text-sm text-slate-500 dark:text-slate-400
-              hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
-      {{ t('nav.about') }}
-    </a>
-
     <!-- User menu: real user → avatar+menu; guest → login button -->
     {% if user and not user.is_guest %}
     <div class="shrink-0 relative" x-data="{open:false}">
@@ -198,6 +191,13 @@
       {{ t('nav.login') }}
     </button>
     {% endif %}
+
+    <!-- About link — far right, separated from user block -->
+    <a href="/about"
+       class="shrink-0 ml-3 px-3 py-1.5 text-sm text-slate-500 dark:text-slate-400
+              hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
+      {{ t('nav.about') }}
+    </a>
 
   </div>
 </header>
