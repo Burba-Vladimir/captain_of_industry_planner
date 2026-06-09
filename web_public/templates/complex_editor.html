@@ -3,7 +3,34 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% if complex_id != 'null' %}Complex Editor{% else %}New Complex{% endif %} — CoI Planner</title>
+  {% set _cx_name   = og_complex_name | default(None) %}
+  {% set _cx_author = og_author_name  | default(None) %}
+  {% if readonly and _cx_name %}
+    {% set _title   = _cx_name + ' — CoI Planner' %}
+    {% set _desc    = ('By ' + _cx_author + '. ') if _cx_author else '' %}
+    {% set _desc    = _desc + 'Captain of Industry production complex.' %}
+  {% else %}
+    {% set _title   = ('Editing — ' + _cx_name) if _cx_name else 'CoI Planner — Complex Editor' %}
+    {% set _desc    = 'Design and calculate Captain of Industry production complexes.' %}
+  {% endif %}
+  <title>{{ _title }}</title>
+  <!-- SEO -->
+  <meta name="description" content="{{ _desc }}">
+  {% if readonly %}<link rel="canonical" href="{{ request.url }}">{% endif %}
+  <!-- Open Graph (meaningful only for public view pages) -->
+  <meta property="og:site_name"    content="CoI Planner">
+  <meta property="og:type"         content="{{ 'article' if readonly else 'website' }}">
+  <meta property="og:url"          content="{{ request.url }}">
+  <meta property="og:title"        content="{{ _title }}">
+  <meta property="og:description"  content="{{ _desc }}">
+  <meta property="og:image"        content="{{ request.host_url }}static/og-preview.png">
+  <meta property="og:image:width"  content="1200">
+  <meta property="og:image:height" content="630">
+  <!-- Twitter/X Card -->
+  <meta name="twitter:card"        content="summary_large_image">
+  <meta name="twitter:title"       content="{{ _title }}">
+  <meta name="twitter:description" content="{{ _desc }}">
+  <meta name="twitter:image"       content="{{ request.host_url }}static/og-preview.png">
   <script>
     (function(){ var t=localStorage.getItem('coi_theme'); if(t==='dark') document.documentElement.classList.add('dark'); })();
   </script>

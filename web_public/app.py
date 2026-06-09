@@ -863,14 +863,17 @@ def complex_view(slug: str):
         abort(404)
     with get_db() as con:
         with con.cursor() as cur:
-            cur.execute(
-                "SELECT id, user_id, visibility, is_ghost FROM complexes WHERE slug = %s",
-                (slug,)
-            )
+            cur.execute("""
+                SELECT c.id, c.user_id, c.visibility, c.is_ghost,
+                       c.name, u.display_name AS author_name
+                FROM complexes c
+                LEFT JOIN users u ON u.id = c.user_id
+                WHERE c.slug = %s
+            """, (slug,))
             row = cur.fetchone()
     if not row:
         abort(404)
-    complex_id, owner_id, visibility, is_ghost_complex = row
+    complex_id, owner_id, visibility, is_ghost_complex, cx_name, cx_author = row
 
     current_uid = g.user["id"] if g.get("user") else None
     # Если текущий пользователь — владелец (и это не ghost) → отправляем сразу на редактирование
@@ -892,7 +895,9 @@ def complex_view(slug: str):
                            complex_id=complex_id,
                            readonly=True,
                            from_page=from_page,
-                           user=g.get("user"))
+                           user=g.get("user"),
+                           og_complex_name=cx_name,
+                           og_author_name=cx_author)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -2369,6 +2374,32 @@ def cleanup_ghosts(dry_run: bool) -> None:
     if deleted_ids is not None:
         click.echo(f"Удалено {len(deleted_ids)} ghost-комплексов. "
                    f"IDs: {deleted_ids[:10]}{'...' if len(deleted_ids) > 10 else ''}")
+
+
+@app.cli.command("send-test-email")
+@click.argument("to")
+def send_test_email(to: str) -> None:
+    """Отправить тестовое письмо для проверки SMTP.
+
+    Пример:
+        flask send-test-email your@email.com
+    """
+    from auth import _send_email
+    import os
+    smtp_host = os.environ.get("SMTP_HOST")
+    if not smtp_host:
+        click.echo("SMTP_HOST not set in .env -- code will only appear in log (dev mode).")
+    else:
+        click.echo(f"Sending via {smtp_host} -> {to} ...")
+    try:
+        _send_email(to, "123456")
+        if smtp_host:
+            click.echo("OK: email sent. Check your inbox (and Spam folder).")
+        else:
+            click.echo("OK: code printed to log (SMTP not configured).")
+    except Exception as e:
+        click.echo(f"ERROR: {e}", err=True)
+        raise SystemExit(1)
 
 
 # ─────────────────────────────────────────────────────────────────
