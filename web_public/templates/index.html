@@ -180,6 +180,13 @@
             {{ t('nav.logout') }}
           </button>
         </form>
+        <div class="border-t border-slate-100 dark:border-slate-700 mx-2 my-1"></div>
+        <a href="/privacy"
+           class="block px-3 py-1.5 mx-1 text-xs text-slate-400 dark:text-slate-500
+                  hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700
+                  rounded-lg transition-colors">
+          {{ t('cookie.privacy_link') }}
+        </a>
       </div>
     </div>
     {% else %}
@@ -1665,6 +1672,12 @@ function app() {
   };
 }
 </script>
+
+<!-- ── Micro-footer ────────────────────────────────────────────────── -->
+<footer class="text-center text-xs text-slate-500 dark:text-slate-600 py-3">
+  &copy; 2026 CoI Planner &nbsp;&middot;&nbsp;
+  <a href="/privacy" class="hover:text-slate-400 dark:hover:text-slate-400 hover:underline">{{ t('cookie.privacy_link') }}</a>
+</footer>
 
 <!-- ── Cookie consent banner ──────────────────────────────────────── -->
 <div x-data="{ show: !localStorage.getItem('coi_cookie_ok') }"

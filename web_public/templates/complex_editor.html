@@ -2782,6 +2782,12 @@ function complexEditor(complexId, readOnlyMode) {
 }
 </script>
 
+<!-- ── Micro-footer ────────────────────────────────────────────────── -->
+<footer class="text-center text-xs text-slate-500 dark:text-slate-600 py-3">
+  &copy; 2026 CoI Planner &nbsp;&middot;&nbsp;
+  <a href="/privacy" class="hover:text-slate-400 dark:hover:text-slate-400 hover:underline">{{ t('cookie.privacy_link') }}</a>
+</footer>
+
 <!-- ── Cookie consent banner ──────────────────────────────────────── -->
 <div x-data="{ show: !localStorage.getItem('coi_cookie_ok') }"
      x-show="show" x-cloak
