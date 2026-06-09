@@ -6,7 +6,8 @@
     "public": "Сообщество",
     "login": "Войти",
     "logout": "Выйти",
-    "settings": "Настройки"
+    "settings": "Настройки",
+    "about": "О проекте"
   },
   "auth": {
     "sign_in_with_google": "Войти через Google",

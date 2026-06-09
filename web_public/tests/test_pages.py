@@ -52,6 +52,25 @@ class TestPrivacy:
         assert "Политика конфиденциальности".encode() in r.data
 
 
+class TestAbout:
+    def test_about_en(self, client):
+        r = client.get("/about")
+        assert r.status_code == 200
+        assert b"CoI Planner" in r.data
+        assert b"Ko-fi" in r.data
+
+    def test_about_ru(self, client):
+        r = client.get("/about?lang=ru")
+        assert r.status_code == 200
+        assert "О проекте".encode() in r.data
+        assert b"Boosty" in r.data
+
+    def test_about_linked_from_index(self, client):
+        r = client.get("/")
+        assert r.status_code == 200
+        assert b"/about" in r.data
+
+
 class TestComplexRoutes:
     def test_nonexistent_complex_edit_404(self, client):
         r = client.get("/complex/00000000-0000-0000-0000-000000000000/edit")

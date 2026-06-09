@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}"
+      x-data
+      :class="localStorage.getItem('theme')==='light' ? 'light' : 'dark'">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% if lang == 'ru' %}
+  <title>О проекте — CoI Planner</title>
+  <meta name="description" content="CoI Planner — бесплатный планировщик производственных комплексов для игры Captain of Industry.">
+  {% else %}
+  <title>About — CoI Planner</title>
+  <meta name="description" content="CoI Planner — a free production planning tool for Captain of Industry.">
+  {% endif %}
+  <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-200 min-h-screen">
+
+  <!-- ── Nav ────────────────────────────────────────────────────────── -->
+  <header class="bg-slate-800 border-b border-slate-700 shadow-sm sticky top-0 z-20">
+    <div class="max-w-4xl mx-auto px-4 py-2.5 flex items-center gap-4">
+      <a href="/" class="text-base font-bold tracking-tight text-slate-100 hover:text-white transition-colors">
+        ⚙ CoI Planner
+      </a>
+      <a href="/" class="text-sm text-slate-400 hover:text-slate-200 transition-colors ml-auto">
+        {% if lang == 'ru' %}&larr; На главную{% else %}&larr; Back{% endif %}
+      </a>
+    </div>
+  </header>
+
+  <!-- ── Hero ───────────────────────────────────────────────────────── -->
+  <section class="max-w-4xl mx-auto px-4 pt-14 pb-10 text-center">
+    <div class="text-5xl mb-4">⚙</div>
+    {% if lang == 'ru' %}
+    <h1 class="text-3xl sm:text-4xl font-bold text-white mb-3">CoI Planner</h1>
+    <p class="text-lg text-slate-400 max-w-xl mx-auto leading-relaxed">
+      Бесплатный визуальный планировщик производственных комплексов
+      для игры <strong class="text-slate-200">Captain of Industry</strong>.
+      Рассчитывайте потоки ресурсов, делитесь схемами с сообществом.
+    </p>
+    {% else %}
+    <h1 class="text-3xl sm:text-4xl font-bold text-white mb-3">CoI Planner</h1>
+    <p class="text-lg text-slate-400 max-w-xl mx-auto leading-relaxed">
+      A free visual production planner for
+      <strong class="text-slate-200">Captain of Industry</strong>.
+      Design production complexes, calculate resource flows,
+      and share blueprints with the community.
+    </p>
+    {% endif %}
+    <div class="mt-6">
+      <a href="/"
+         class="inline-block px-6 py-2.5 bg-blue-600 hover:bg-blue-500
+                text-white font-medium rounded-xl transition-colors text-sm">
+        {% if lang == 'ru' %}Открыть планировщик{% else %}Open Planner{% endif %}
+      </a>
+    </div>
+  </section>
+
+  <!-- ── Features ───────────────────────────────────────────────────── -->
+  <section class="max-w-4xl mx-auto px-4 pb-14">
+    {% if lang == 'ru' %}
+    <h2 class="text-xl font-bold text-white mb-6 text-center">Что умеет планировщик</h2>
+    {% else %}
+    <h2 class="text-xl font-bold text-white mb-6 text-center">Features</h2>
+    {% endif %}
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+      {% if lang == 'ru' %}
+      {% set features = [
+        ('🗺', 'Визуальный редактор', 'Узлы и рёбра — проектируйте комплексы как граф. Перетаскивайте, соединяйте, масштабируйте.'),
+        ('🔢', 'Расчёт потоков', 'Автоматический подсчёт входов и выходов с учётом производительности и циклов.'),
+        ('🔍', 'Поиск рецептов', 'Все рецепты и здания игры в одной таблице. Расширенный поиск: по ресурсу, машине, тегу.'),
+        ('🌐', 'Сообщество', 'Публикуйте свои комплексы и изучайте чужие. Лайки, форки, закладки.'),
+        ('🏷', 'Теги', 'Помечайте комплексы тегами на любом языке, ищите по хэштегу.'),
+        ('👻', 'Снимки (Ghost)', 'Если оригинал удалён — ваши закладки сохраняют замороженную копию.'),
+        ('🌙', 'Тёмная тема', 'Светлая и тёмная тема, сохраняется между сессиями.'),
+        ('🇷🇺🇬🇧', 'RU / EN', 'Полный перевод интерфейса и игровых названий на русский язык.'),
+        ('🔒', 'Без пароля', 'Вход по одноразовому коду на email — никаких паролей.'),
+      ] %}
+      {% else %}
+      {% set features = [
+        ('🗺', 'Visual Editor', 'Nodes and edges — design complexes as a graph. Drag, connect, zoom.'),
+        ('🔢', 'Flow Calculator', 'Automatic calculation of inputs and outputs accounting for throughput and cycle times.'),
+        ('🔍', 'Recipe Browser', 'All game recipes and buildings in one table. Advanced search by resource, machine, or tag.'),
+        ('🌐', 'Community', 'Publish your complexes and explore others. Likes, forks, bookmarks.'),
+        ('🏷', 'Tags', 'Tag complexes in any language, search by hashtag.'),
+        ('👻', 'Ghost Snapshots', 'If the original is deleted, your bookmarks preserve a frozen copy.'),
+        ('🌙', 'Dark Theme', 'Light and dark theme, persisted across sessions.'),
+        ('🇷🇺🇬🇧', 'RU / EN', 'Full interface and game-name translation into Russian.'),
+        ('🔒', 'Passwordless', 'Sign in with a one-time email code — no passwords.'),
+      ] %}
+      {% endif %}
+
+      {% for icon, title, desc in features %}
+      <div class="bg-slate-800 rounded-xl p-4 border border-slate-700 hover:border-slate-500 transition-colors">
+        <div class="text-2xl mb-2">{{ icon }}</div>
+        <h3 class="font-semibold text-slate-100 mb-1 text-sm">{{ title }}</h3>
+        <p class="text-xs text-slate-400 leading-relaxed">{{ desc }}</p>
+      </div>
+      {% endfor %}
+
+    </div>
+  </section>
+
+  <!-- ── Support ─────────────────────────────────────────────────────── -->
+  <section class="max-w-4xl mx-auto px-4 pb-16">
+    <div class="bg-slate-800 rounded-2xl border border-slate-700 p-8 text-center">
+
+      {% if lang == 'ru' %}
+      <h2 class="text-xl font-bold text-white mb-2">Поддержать проект</h2>
+      <p class="text-slate-400 text-sm mb-8 max-w-lg mx-auto">
+        CoI Planner бесплатен и всегда таким останется. Если инструмент полезен —
+        поддержите разработку: это помогает поддерживать сервер и продолжать развитие.
+      </p>
+      {% else %}
+      <h2 class="text-xl font-bold text-white mb-2">Support the project</h2>
+      <p class="text-slate-400 text-sm mb-8 max-w-lg mx-auto">
+        CoI Planner is free and will always remain free. If you find it useful,
+        consider supporting development — it helps keep the server running and the project growing.
+      </p>
+      {% endif %}
+
+      <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+
+        <!-- Ko-fi -->
+        <a href="#"  {# TODO: вставить ссылку Ko-fi #}
+           class="flex items-center gap-2.5 px-5 py-3 rounded-xl font-medium text-sm
+                  bg-[#FF5E5B] hover:bg-[#e54e4b] text-white transition-colors w-full sm:w-auto justify-center">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 9.298-.022 11.205c.068 2.268 1.949 2.885 3.745 2.885H5.72c1.044 0 1.049-1.064 1.049-1.064s.049-5.064-.001-6.335c-.052-1.27 1.048-1.394 1.048-1.394s1.048-.014 1.048 1.394c0 1.408.048 6.335.048 6.335S8.918 19.25 9.962 19.25H18.2c2.268 0 3.745-.617 3.745-2.885.06-1.907-.022-7.319-.064-7.417zm-6.675 4.273c-.754.692-1.748.923-2.698.923H12.1v2.626h-1.407v-7.29h3.815c.95 0 1.944.231 2.698.923.767.702.906 1.878.437 2.818-.107.216-.261.415-.437.6zm-.957-3.136c-.398-.356-.922-.549-1.74-.549H12.1v2.938h2.41c.818 0 1.342-.193 1.74-.549.398-.356.398-.884 0-1.84z"/>
+          </svg>
+          Ko-fi
+        </a>
+
+        <!-- Boosty -->
+        <a href="#"  {# TODO: вставить ссылку Boosty #}
+           class="flex items-center gap-2.5 px-5 py-3 rounded-xl font-medium text-sm
+                  bg-[#F15A22] hover:bg-[#d94e1b] text-white transition-colors w-full sm:w-auto justify-center">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+          </svg>
+          Boosty
+        </a>
+
+        <!-- Patreon -->
+        <a href="#"  {# TODO: вставить ссылку Patreon #}
+           class="flex items-center gap-2.5 px-5 py-3 rounded-xl font-medium text-sm
+                  bg-[#FF424D] hover:bg-[#e03840] text-white transition-colors w-full sm:w-auto justify-center">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M14.82 2.41c3.96 0 7.18 3.24 7.18 7.21 0 3.96-3.22 7.18-7.18 7.18-3.97 0-7.21-3.22-7.21-7.18 0-3.97 3.24-7.21 7.21-7.21zM2 21.6h3.5V2.41H2V21.6z"/>
+          </svg>
+          Patreon
+        </a>
+
+      </div>
+
+      {% if lang == 'ru' %}
+      <p class="text-xs text-slate-500 mt-6">
+        Boosty работает с картами РФ · Ko-fi и Patreon — для зарубежных читателей
+      </p>
+      {% else %}
+      <p class="text-xs text-slate-500 mt-6">
+        Ko-fi &amp; Patreon accept international cards · Boosty is available for Russian supporters
+      </p>
+      {% endif %}
+
+    </div>
+  </section>
+
+  <!-- ── Footer ─────────────────────────────────────────────────────── -->
+  <footer class="text-center text-xs text-slate-600 py-4 pb-6">
+    &copy; 2026 CoI Planner &nbsp;&middot;&nbsp;
+    <a href="/privacy" class="hover:text-slate-400 hover:underline">{{ t('cookie.privacy_link') }}</a>
+  </footer>
+
+</body>
+</html>

@@ -106,6 +106,13 @@
               class="px-3 py-1.5 transition-colors border-l border-slate-200 dark:border-slate-600">{{ t('nav.public') }}</button>
     </div>
 
+    <!-- About link -->
+    <a href="/about"
+       class="shrink-0 px-3 py-1.5 text-sm text-slate-500 dark:text-slate-400
+              hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
+      {{ t('nav.about') }}
+    </a>
+
     <!-- Search (browse) -->
     <div class="flex-1 min-w-32 max-w-sm relative" x-show="tab==='browse'">
       <input type="search"
