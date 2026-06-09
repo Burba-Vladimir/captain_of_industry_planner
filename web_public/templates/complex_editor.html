@@ -2781,5 +2781,28 @@ function complexEditor(complexId, readOnlyMode) {
   };
 }
 </script>
+
+<!-- ── Cookie consent banner ──────────────────────────────────────── -->
+<div x-data="{ show: !localStorage.getItem('coi_cookie_ok') }"
+     x-show="show" x-cloak
+     x-transition:enter="transition ease-out duration-300"
+     x-transition:enter-start="opacity-0 translate-y-2"
+     x-transition:enter-end="opacity-100 translate-y-0"
+     class="fixed bottom-0 inset-x-0 z-50
+            bg-slate-800 dark:bg-slate-950
+            border-t border-slate-700 dark:border-slate-600
+            shadow-lg px-4 py-3">
+  <div class="max-w-4xl mx-auto flex flex-col sm:flex-row items-start sm:items-center gap-3">
+    <p class="text-sm text-slate-300 flex-1 leading-relaxed">
+      This site uses a strictly necessary session cookie for login — no tracking, no advertising.
+      <a href="/privacy" class="underline text-blue-400 hover:text-blue-300 ml-1 whitespace-nowrap">Privacy Policy</a>
+    </p>
+    <button @click="localStorage.setItem('coi_cookie_ok','1'); show=false"
+            class="shrink-0 px-4 py-1.5 bg-blue-600 hover:bg-blue-500
+                   text-white text-sm font-medium rounded-lg transition-colors">
+      Got it
+    </button>
+  </div>
+</div>
 </body>
 </html>

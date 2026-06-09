@@ -28,6 +28,15 @@ class TestIndex:
         assert r.status_code == 200
 
 
+class TestPrivacy:
+    def test_privacy_ok(self, client):
+        r = client.get("/privacy")
+        assert r.status_code == 200
+        assert b"Privacy Policy" in r.data
+        assert b"cookie" in r.data.lower()
+        assert b"privacy" in r.data.lower()
+
+
 class TestComplexRoutes:
     def test_nonexistent_complex_edit_404(self, client):
         r = client.get("/complex/00000000-0000-0000-0000-000000000000/edit")

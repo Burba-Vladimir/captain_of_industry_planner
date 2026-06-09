@@ -797,6 +797,11 @@ def index():
     return render_template("index.html", user=g.get("user"))
 
 
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html")
+
+
 @app.route("/complex/new")
 def complex_new():
     return render_template("complex_editor.html",

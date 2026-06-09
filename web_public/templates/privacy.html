@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en"
+      x-data
+      :class="localStorage.getItem('theme')==='light' ? 'light' : 'dark'">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy — CoI Planner</title>
+  <meta name="description" content="Privacy policy for CoI Planner — what data we collect and how it is used.">
+  <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
+</head>
+<body class="bg-slate-900 dark:bg-slate-900 text-slate-200 dark:text-slate-200
+             min-h-screen py-10 px-4">
+
+  <!-- nav -->
+  <div class="max-w-2xl mx-auto mb-6">
+    <a href="/" class="text-blue-400 hover:text-blue-300 text-sm">&larr; Back to CoI Planner</a>
+  </div>
+
+  <!-- content -->
+  <article class="max-w-2xl mx-auto prose prose-invert prose-slate prose-sm sm:prose-base">
+
+    <h1 class="text-2xl font-bold mb-2">Privacy Policy</h1>
+    <p class="text-slate-400 text-sm mb-8">Last updated: June 2026</p>
+
+    <h2>Who we are</h2>
+    <p>
+      CoI Planner is a free, open-source production planning tool for the game
+      <em>Captain of Industry</em>. The service is operated by an individual developer.
+      If you have any questions, contact us at
+      <a href="mailto:dogmat.igwt@gmail.com" class="text-blue-400 hover:text-blue-300">dogmat.igwt@gmail.com</a>.
+    </p>
+
+    <h2>What data we collect</h2>
+
+    <h3>Account data</h3>
+    <p>
+      If you choose to sign in, we store your <strong>email address</strong> in our database.
+      It is used solely to identify your account and send one-time login codes.
+      We do not store passwords.
+    </p>
+
+    <h3>User content</h3>
+    <p>
+      Production complexes you create, their names, tags, and graph data are stored in our
+      database so you can retrieve them later. Public complexes are visible to other users;
+      private complexes are visible only to you.
+    </p>
+
+    <h3>IP address</h3>
+    <p>
+      Your IP address is temporarily used for rate-limiting (preventing abuse).
+      It is not stored in our database and is not linked to your account.
+    </p>
+
+    <h3>Session cookie</h3>
+    <p>
+      We use a single, strictly necessary HTTP session cookie to keep you logged in.
+      This cookie contains only an opaque session ID — no personal data.
+      It expires when you close your browser or log out.
+    </p>
+
+    <h2>What we do NOT collect</h2>
+    <ul>
+      <li>We do not use analytics, tracking pixels, or advertising cookies.</li>
+      <li>We do not share your data with third parties.</li>
+      <li>We do not sell your data.</li>
+    </ul>
+
+    <h2>Data storage and security</h2>
+    <p>
+      All data is stored on servers located in the European Union.
+      By using this service you acknowledge that your data is processed on EU infrastructure.
+    </p>
+
+    <h2>Your rights</h2>
+    <p>You have the right to:</p>
+    <ul>
+      <li><strong>Access</strong> — view all your complexes from the Browse tab.</li>
+      <li><strong>Deletion</strong> — delete your account and all associated data at any time
+          via <em>Settings → Delete Account</em>. This action is immediate and irreversible.</li>
+      <li><strong>Portability</strong> — your complex graphs are accessible via the API at
+          <code>/api/complex/&lt;id&gt;/graph</code>.</li>
+    </ul>
+    <p>
+      For any other requests (e.g. export of your email address from our database), contact us at
+      <a href="mailto:dogmat.igwt@gmail.com" class="text-blue-400 hover:text-blue-300">dogmat.igwt@gmail.com</a>.
+    </p>
+
+    <h2>Cookies</h2>
+    <p>
+      This site uses one strictly necessary cookie:
+    </p>
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Purpose</th><th>Duration</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>session</code></td>
+          <td>Keeps you logged in between page loads</td>
+          <td>Session (cleared on logout / browser close)</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>
+      No analytics, advertising, or third-party cookies are used.
+      A localStorage key (<code>coi_cookie_ok</code>) is set when you dismiss the cookie banner;
+      it does not leave your device.
+    </p>
+
+    <h2>Changes to this policy</h2>
+    <p>
+      If we make material changes to this policy, we will update the date at the top of this page.
+      Continued use of the service after changes constitutes acceptance.
+    </p>
+
+  </article>
+
+</body>
+</html>
