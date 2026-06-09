@@ -514,6 +514,22 @@
                           ⚡ <span :class="node.electricity_kw < 0 ? 'text-emerald-600' : 'text-orange-500'"
                                    x-text="Math.abs(node.electricity_kw) + ' kW'"></span>
                         </p>
+                        <p x-show="node.computing_tf && node.computing_tf !== 0">
+                          💻 <span :class="node.computing_tf < 0 ? 'text-orange-500' : 'text-cyan-500'"
+                                   x-text="Math.abs(node.computing_tf) + ' TF'"></span>
+                        </p>
+                        <template x-if="node.construction && node.construction.length">
+                          <p class="flex items-center gap-1 flex-wrap">
+                            <span>🏗</span>
+                            <template x-for="c in node.construction" :key="c.item">
+                              <span class="flex items-center gap-0.5" :title="c.item">
+                                <img :src="iconOf(c.item)" @error="$el.style.display='none'"
+                                     class="w-3.5 h-3.5 object-contain">
+                                <span x-text="c.qty"></span>
+                              </span>
+                            </template>
+                          </p>
+                        </template>
                       </div>
                     </template>
                     <template x-if="node.node_type==='complex'">

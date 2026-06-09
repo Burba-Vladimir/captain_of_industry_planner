@@ -571,11 +571,13 @@ SELECT * FROM (
         r.machine_name,
         r.cycle_time_s,
         b.workers,
-        b.electricity_kw,
+        b.electricity_kw * COALESCE(r.power_multiplier, 1.0) AS electricity_kw,
+        b.computing_tf,
         r.deprecated,
         inp.items       AS inputs,
         out.items       AS outputs,
         mnt.items       AS maintenance,
+        constr.items    AS construction,
         NULL::uuid      AS slug,
         NULL::integer   AS owner_id,
         NULL::text      AS visibility,
@@ -626,6 +628,15 @@ SELECT * FROM (
         WHERE bm.building_id = b.id
     ) mnt ON TRUE
 
+    LEFT JOIN LATERAL (
+        SELECT json_agg(
+                   json_build_object('item', bc.item, 'qty', bc.qty)
+                   ORDER BY bc.item
+               ) AS items
+        FROM  building_construction bc
+        WHERE bc.building_id = b.id
+    ) constr ON TRUE
+
     UNION ALL
 
     SELECT
@@ -636,10 +647,12 @@ SELECT * FROM (
         NULL                                    AS cycle_time_s,
         c.total_workers                         AS workers,
         c.total_electricity_kw                  AS electricity_kw,
+        NULL::numeric                           AS computing_tf,
         FALSE                                   AS deprecated,
         inp.items                               AS inputs,
         out.items                               AS outputs,
         mnt_cx.items                            AS maintenance,
+        NULL::json                              AS construction,
         c.slug                                  AS slug,
         c.user_id                               AS owner_id,
         c.visibility::text                      AS visibility,
@@ -764,6 +777,21 @@ def _parse_row(row: dict) -> dict:
     for f in ("cycle_time_s", "workers", "electricity_kw"):
         if row[f] is not None:
             row[f] = float(row[f])
+    # computing_tf: float or None
+    if row.get("computing_tf") is not None:
+        row["computing_tf"] = float(row["computing_tf"])
+    # construction: one-time build cost items list
+    v = row.get("construction")
+    if v is None:
+        row["construction"] = []
+    elif isinstance(v, str):
+        row["construction"] = json.loads(v)
+    if isinstance(row.get("construction"), list):
+        row["construction"] = [
+            {k: float(val) if isinstance(val, decimal.Decimal) else val
+             for k, val in item.items()}
+            for item in row["construction"]
+        ]
     row["deprecated"] = bool(row.get("deprecated"))
 
     # Tags: psycopg2 may return already-parsed list, a JSON string, or None
@@ -1745,7 +1773,9 @@ def api_complex_graph(complex_id: int):
                         cm.efficiency, cm.idle_item, cm.idle_direction, cm.is_manual_partial,
                         cm.external_ports,
                         r.machine_name,
-                        b.workers,          b.electricity_kw,
+                        b.workers,
+                        b.electricity_kw * COALESCE(r.power_multiplier, 1.0) AS electricity_kw,
+                        b.computing_tf,
                         c2.name             AS complex_name,
                         c2.slug             AS complex_slug,
                         c2.total_workers    AS complex_workers,
@@ -1759,7 +1789,8 @@ def api_complex_graph(complex_id: int):
                         inp.items  AS inputs,
                         out.items  AS outputs,
                         mnt.items  AS maintenance,
-                        mnt_cx.items AS complex_maintenance
+                        mnt_cx.items AS complex_maintenance,
+                        constr.items AS construction
                     FROM complex_members cm
                     LEFT JOIN recipes   r  ON r.id  = cm.recipe_id
                     LEFT JOIN buildings b  ON b.id  = r.machine_id
@@ -1797,6 +1828,13 @@ def api_complex_graph(complex_id: int):
                             ORDER BY cmnt.item) AS items
                         FROM complex_maintenance cmnt WHERE cmnt.complex_id = cm.child_complex_id
                     ) mnt_cx ON (cm.child_type = 1)
+
+                    LEFT JOIN LATERAL (
+                        SELECT json_agg(json_build_object(
+                            'item', bc.item, 'qty', bc.qty)
+                            ORDER BY bc.item) AS items
+                        FROM building_construction bc WHERE bc.building_id = b.id
+                    ) constr ON (cm.child_type = 0)
 
                     WHERE cm.complex_id = %s
                     ORDER BY cm.id
@@ -1869,12 +1907,16 @@ def api_complex_graph(complex_id: int):
                 mnt_list     = _add_item_display(_parse_json_list(m["complex_maintenance"]))
                 workers_val  = _f(m["complex_workers"])       if m.get("complex_workers")       is not None else None
                 elec_val     = _f(m["complex_electricity_kw"]) if m.get("complex_electricity_kw") is not None else None
+                computing_val = None
+                constr_list  = []
             else:
                 inp_list     = _add_item_display(_parse_json_list(m["inputs"]))
                 out_list     = _add_item_display(_parse_json_list(m["outputs"]))
                 mnt_list     = _add_item_display(_parse_json_list(m["maintenance"]))
                 workers_val  = _f(m["workers"])       if m["workers"]       is not None else None
                 elec_val     = _f(m["electricity_kw"]) if m["electricity_kw"] is not None else None
+                computing_val = _f(m["computing_tf"])  if m.get("computing_tf") is not None else None
+                constr_list  = _parse_json_list(m.get("construction"))
 
             raw_label = m["machine_name"] or m["complex_name"] or "?"
             label = trans.get(raw_label, raw_label) if trans and m["machine_name"] else raw_label
@@ -1895,9 +1937,11 @@ def api_complex_graph(complex_id: int):
                 "node_ref_slug":    str(m["complex_slug"]) if m.get("complex_slug") else None,
                 "workers":          workers_val,
                 "electricity_kw":   elec_val,
+                "computing_tf":     computing_val,
                 "inputs":           inp_list,
                 "outputs":          out_list,
                 "maintenance":      mnt_list,
+                "construction":     constr_list,
                 # Ownership + Ghost info (только для complex-узлов)
                 "owner_id":         m.get("complex_owner_id") if is_complex else None,
                 "is_ghost":         bool(m.get("complex_is_ghost")) if is_complex else False,

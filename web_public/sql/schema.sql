@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS buildings (
     po_key         TEXT,                 -- msgid из .po файла игры (для локализации)
     workers        SMALLINT     CHECK (workers >= 0),
     electricity_kw NUMERIC(10, 2),
+    computing_tf   NUMERIC      NOT NULL DEFAULT 0,  -- net TF: positive=generates, negative=consumes
     footprint      VARCHAR(20),
     designation    VARCHAR(100),
     CONSTRAINT uq_buildings_name UNIQUE (name)
@@ -57,12 +58,13 @@ CREATE TABLE IF NOT EXISTS building_construction (
 );
 
 CREATE TABLE IF NOT EXISTS recipes (
-    id           SERIAL  PRIMARY KEY,
-    wiki_id      TEXT,                    -- стабильный ID с вики (RecipeId из Cargo API)
-    machine_id   INTEGER REFERENCES buildings (id) ON DELETE SET NULL,
-    machine_name VARCHAR(200) NOT NULL,
-    cycle_time_s NUMERIC(8, 2) CHECK (cycle_time_s > 0),
-    deprecated   BOOLEAN NOT NULL DEFAULT FALSE
+    id               SERIAL  PRIMARY KEY,
+    wiki_id          TEXT,                    -- стабильный ID с вики (RecipeId из Cargo API)
+    machine_id       INTEGER REFERENCES buildings (id) ON DELETE SET NULL,
+    machine_name     VARCHAR(200) NOT NULL,
+    cycle_time_s     NUMERIC(8, 2) CHECK (cycle_time_s > 0),
+    deprecated       BOOLEAN NOT NULL DEFAULT FALSE,
+    power_multiplier NUMERIC NOT NULL DEFAULT 1.0  -- energy multiplier for this recipe variant
 );
 
 -- wiki_id уникален в рамках одной машины (разные машины могут иметь один wiki_id)
@@ -254,7 +256,7 @@ BEGIN
         GROUP BY cm.recipe_id
     )
     SELECT COALESCE(SUM(ar.total_mult * COALESCE(b.workers, 0)), 0),
-           COALESCE(SUM(ar.total_mult * COALESCE(b.electricity_kw, 0)), 0)
+           COALESCE(SUM(ar.total_mult * COALESCE(b.electricity_kw, 0) * COALESCE(r.power_multiplier, 1.0)), 0)
     INTO v_workers, v_electricity
     FROM all_recipes ar JOIN recipes r ON r.id = ar.recipe_id LEFT JOIN buildings b ON b.id = r.machine_id;
 
