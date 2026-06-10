@@ -518,7 +518,7 @@
           </div>
           <!-- ↗ открывает комплекс-узел: edit если владелец, иначе view -->
           <a x-show="node.node_type === 'complex' && node.node_ref_slug"
-             :href="`/complex/${node.node_ref_slug}/${node.owner_id === window._coiUser?.id ? 'edit' : 'view'}?back=${encodeURIComponent(location.href)}`"
+             :href="`/complex/${node.node_ref_slug}/${node.owner_id === window._coiUser?.id ? 'edit' : 'view'}?back=${encodeURIComponent(location.pathname+location.search)}`"
              target="_blank"
              @click.stop @mousedown.stop
              class="text-violet-400 hover:text-violet-600 text-sm shrink-0
@@ -588,14 +588,14 @@
                   class="ml-auto w-3.5 h-3.5 rounded-full border-2 cursor-pointer transition-all shrink-0"></button>
         </div>
 
-        <!-- Construction cost (one-time, not multiplied by count) -->
+        <!-- Construction cost (scaled by physical building count) -->
         <div x-show="node.construction && node.construction.length"
              class="flex items-center flex-wrap gap-x-2 gap-y-0.5 px-3 py-1
                     border-t border-slate-100 dark:border-slate-700 text-xs text-slate-400">
           <template x-for="c in (node.construction||[])" :key="c.item">
             <span class="flex items-center gap-0.5" :title="c.item_display||c.item">
               <img :src="iconOf(c.item_en||c.item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
-              <span x-text="c.qty"></span>
+              <span x-text="Math.ceil(c.qty * Math.ceil(node.count||1))"></span>
             </span>
           </template>
         </div>
@@ -2676,7 +2676,7 @@ function complexEditor(complexId, readOnlyMode) {
         for (const o of (node.outputs||[])) net[o.item]=(net[o.item]||0)+(o.qty_per_min||0)*m;
         for (const i of (node.inputs ||[])) net[i.item]=(net[i.item]||0)-(i.qty_per_min||0)*m;
         for (const x of (node.maintenance||[])) maint[x.item]=(maint[x.item]||0)+(x.rate_per_min||0)*m;
-        for (const c of (node.construction||[])) constr[c.item]=(constr[c.item]||0)+c.qty*(node.count||1);
+        for (const c of (node.construction||[])) constr[c.item]=(constr[c.item]||0)+c.qty*Math.ceil(node.count||1);
         totalWorkers+=(node.workers||0)*mW;
         totalElec   +=(node.electricity_kw||0)*m;
         totalTf     +=(node.computing_tf||0)*m;

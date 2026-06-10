@@ -437,7 +437,7 @@
                 </a>
                 <!-- Редактировать комплекс (только свои) -->
                 <a x-show="node.node_type==='complex' && node.slug && !node._subscribed"
-                   :href="'/complex/' + node.slug + '/edit?back=' + encodeURIComponent(location.href)"
+                   :href="'/complex/' + node.slug + '/edit?back=' + encodeURIComponent(location.pathname+location.search)"
                    class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
                    :title="'{{ t('browse.edit_complex') }}'">
                   <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
@@ -447,7 +447,7 @@
                 </a>
                 <!-- Просмотр чужого (подписанного) комплекса -->
                 <a x-show="node.node_type==='complex' && node.slug && node._subscribed"
-                   :href="'/complex/' + node.slug + '/view?back=' + encodeURIComponent(location.href)"
+                   :href="'/complex/' + node.slug + '/view?back=' + encodeURIComponent(location.pathname+location.search)"
                    class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
                    :title="jt('community.view')">
                   <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
@@ -859,7 +859,7 @@
                 <!-- Own complex → edit + like count (read-only); others → view + download-copy + like button -->
                 <template x-if="window._coiUser && c.user_id === window._coiUser.id">
                   <span class="inline-flex items-center gap-1.5">
-                    <a :href="'/complex/' + c.slug + '/edit?back=' + encodeURIComponent(location.href)"
+                    <a :href="'/complex/' + c.slug + '/edit?back=' + encodeURIComponent(location.pathname+location.search)"
                        class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
                        :title="'{{ t('complex.edit') }}'">
                       <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
@@ -877,7 +877,7 @@
                 </template>
                 <template x-if="!window._coiUser || c.user_id !== window._coiUser.id">
                   <span class="inline-flex items-center gap-1.5">
-                    <a :href="'/complex/' + c.slug + '/view?back=' + encodeURIComponent(location.href)"
+                    <a :href="'/complex/' + c.slug + '/view?back=' + encodeURIComponent(location.pathname+location.search)"
                        class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
                        :title="jt('community.view')">
                       <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
@@ -1409,7 +1409,7 @@ function app() {
     },
     clickNodeName(node) {
       if (node.node_type === 'complex') {
-        window.location.href = '/complex/' + node.slug + '/edit?back=' + encodeURIComponent(location.href);
+        window.location.href = '/complex/' + node.slug + '/edit?back=' + encodeURIComponent(location.pathname+location.search);
       } else {
         this.searchExact(node.machine_name ?? node.name);
       }
