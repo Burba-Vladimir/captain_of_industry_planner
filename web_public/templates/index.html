@@ -269,6 +269,9 @@
             <th class="px-4 py-2.5 text-right w-24 sortable" @click="sortBy('electricity')">
               ⚡ kW <span class="text-slate-300 normal-case" x-text="sortIcon('electricity')"></span>
             </th>
+            <th class="px-3 py-2.5 text-right w-20 sortable" @click="sortBy('computing')">
+              💻 {{ t('browse.tf_unit') }} <span class="text-slate-300 normal-case" x-text="sortIcon('computing')"></span>
+            </th>
             <th class="px-4 py-2.5 w-36 sortable" @click="sortBy('maintenance')">
               🔧 {{ t('browse.col_maint') }} <span class="text-slate-300 normal-case" x-text="sortIcon('maintenance')"></span>
             </th>
@@ -347,6 +350,13 @@
                       x-text="Math.abs(node.electricity_kw)"></span>
                 <span x-show="node.electricity_kw > 0" class="text-orange-500"
                       x-text="node.electricity_kw"></span>
+              </td>
+              <td class="px-3 py-2 text-right tabular-nums text-xs">
+                <span x-show="!node.computing_tf" class="text-slate-200 dark:text-slate-600">—</span>
+                <span x-show="node.computing_tf < 0" class="text-orange-500"
+                      x-text="Math.abs(node.computing_tf)"></span>
+                <span x-show="node.computing_tf > 0" class="text-cyan-500"
+                      x-text="node.computing_tf"></span>
               </td>
               <td class="px-4 py-2">
                 <div class="flex flex-col gap-0.5">
@@ -500,7 +510,7 @@
             <!-- Expanded row -->
             <tr x-show="node._open" class="border-b border-slate-200 dark:border-slate-700">
               <td colspan="2"></td>
-              <td colspan="7" class="px-6 pt-1 pb-4">
+              <td colspan="8" class="px-6 pt-1 pb-4">
                 <div class="grid grid-cols-1 sm:grid-cols-4 gap-5 mt-1">
                   <div>
                     <template x-if="node.node_type==='recipe'">
@@ -516,20 +526,8 @@
                         </p>
                         <p x-show="node.computing_tf && node.computing_tf !== 0">
                           💻 <span :class="node.computing_tf < 0 ? 'text-orange-500' : 'text-cyan-500'"
-                                   x-text="Math.abs(node.computing_tf) + ' TF'"></span>
+                                   x-text="Math.abs(node.computing_tf) + ' {{ t('browse.tf_unit') }}'"></span>
                         </p>
-                        <template x-if="node.construction && node.construction.length">
-                          <p class="flex items-center gap-1 flex-wrap">
-                            <span>🏗</span>
-                            <template x-for="c in node.construction" :key="c.item">
-                              <span class="flex items-center gap-0.5" :title="c.item">
-                                <img :src="iconOf(c.item)" @error="$el.style.display='none'"
-                                     class="w-3.5 h-3.5 object-contain">
-                                <span x-text="c.qty"></span>
-                              </span>
-                            </template>
-                          </p>
-                        </template>
                       </div>
                     </template>
                     <template x-if="node.node_type==='complex'">
@@ -550,26 +548,65 @@
                                 <span x-show="m.workers>0" x-text="'👷'+Math.round(m.workers*m.count)"></span>
                                 <span x-show="m.electricity_kw"
                                       :class="m.electricity_kw<0?'text-emerald-500':'text-orange-400'"
-                                      x-text="'⚡'+Math.abs(+(m.electricity_kw*m.count*m.efficiency).toFixed(1))"></span>
+                                      x-text="'⚡'+Math.abs(+(m.electricity_kw*m.count*(m.efficiency||1)).toFixed(1))"></span>
+                                <span x-show="m.computing_tf"
+                                      :class="m.computing_tf<0?'text-orange-400':'text-cyan-400'"
+                                      x-text="'💻'+Math.abs(+(m.computing_tf*m.count).toFixed(1))+'{{ t('browse.tf_unit') }}'"></span>
                               </span>
+                            </div>
+                          </template>
+                          <!-- Totals -->
+                          <template x-if="node._members && node._members.length">
+                            <div class="pt-1 mt-1 border-t border-slate-200 dark:border-slate-700 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500">
+                              <template x-if="node._members.reduce((s,m)=>s+(m.computing_tf||0)*m.count,0) !== 0">
+                                <span :class="node._members.reduce((s,m)=>s+(m.computing_tf||0)*m.count,0)<0?'text-orange-400':'text-cyan-400'"
+                                      x-text="'💻 '+Math.abs(+(node._members.reduce((s,m)=>s+(m.computing_tf||0)*m.count,0)).toFixed(1))+' {{ t('browse.tf_unit') }}'"></span>
+                              </template>
+                              <template x-if="(()=>{ const t={}; for(const m of node._members||[]) for(const c of(m.construction||[])) t[c.item]=(t[c.item]||0)+c.qty*m.count; return Object.keys(t).length>0; })()">
+                                <span class="flex items-center gap-1 flex-wrap">
+                                  <span>🏗</span>
+                                  <template x-for="[item,qty] in Object.entries((()=>{ const t={}; for(const m of node._members||[]) for(const c of(m.construction||[])) t[c.item]=(t[c.item]||0)+c.qty*m.count; return t; })()).sort()" :key="item">
+                                    <span class="flex items-center gap-0.5" :title="item">
+                                      <img :src="iconOf(item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
+                                      <span x-text="Math.ceil(qty)"></span>
+                                    </span>
+                                  </template>
+                                </span>
+                              </template>
                             </div>
                           </template>
                         </div>
                       </div>
                     </template>
                   </div>
-                  <div x-show="node.maintenance && node.maintenance.length>0">
-                    <p class="text-xs font-semibold text-amber-600 mb-1.5 uppercase tracking-wide">{{ t('browse.col_maint') }}</p>
-                    <div class="space-y-1">
-                      <template x-for="m in (node.maintenance||[])" :key="m.item">
-                        <div class="flex justify-between text-xs gap-4">
-                          <span class="flex items-center gap-1.5">
-                            <img :src="iconOf(m.item_en||m.item)" @error="$el.style.display='none'" class="w-4 h-4 object-contain shrink-0" loading="lazy">
-                            <span x-text="m.item" class="dark:text-slate-300"></span>
-                          </span>
-                          <span class="tabular-nums shrink-0 text-slate-400" x-text="m.rate_per_min+jt('editor.per_min')"></span>
-                        </div>
-                      </template>
+                  <div x-show="(node.maintenance && node.maintenance.length>0) || (node.construction && node.construction.length>0)">
+                    <div x-show="node.maintenance && node.maintenance.length>0">
+                      <p class="text-xs font-semibold text-amber-600 mb-1.5 uppercase tracking-wide">{{ t('browse.col_maint') }}</p>
+                      <div class="space-y-1 mb-3">
+                        <template x-for="m in (node.maintenance||[])" :key="m.item">
+                          <div class="flex justify-between text-xs gap-4">
+                            <span class="flex items-center gap-1.5">
+                              <img :src="iconOf(m.item_en||m.item)" @error="$el.style.display='none'" class="w-4 h-4 object-contain shrink-0" loading="lazy">
+                              <span x-text="m.item" class="dark:text-slate-300"></span>
+                            </span>
+                            <span class="tabular-nums shrink-0 text-slate-400" x-text="m.rate_per_min+jt('editor.per_min')"></span>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                    <div x-show="node.construction && node.construction.length>0">
+                      <p class="text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">🏗 {{ t('browse.col_construction') }}</p>
+                      <div class="space-y-1">
+                        <template x-for="c in (node.construction||[])" :key="c.item">
+                          <div class="flex justify-between text-xs gap-4">
+                            <span class="flex items-center gap-1.5">
+                              <img :src="iconOf(c.item)" @error="$el.style.display='none'" class="w-4 h-4 object-contain shrink-0" loading="lazy">
+                              <span x-text="c.item" class="dark:text-slate-300"></span>
+                            </span>
+                            <span class="tabular-nums shrink-0 text-slate-400" x-text="c.qty"></span>
+                          </div>
+                        </template>
+                      </div>
                     </div>
                   </div>
                   <div x-show="node.inputs.length>0">
@@ -617,7 +654,7 @@
 
         <tbody>
           <tr x-show="!browseLoading && sorted.length===0">
-            <td colspan="9" class="py-16 text-center text-slate-300 dark:text-slate-600 text-sm">{{ t('browse.nothing_found') }}</td>
+            <td colspan="10" class="py-16 text-center text-slate-300 dark:text-slate-600 text-sm">{{ t('browse.nothing_found') }}</td>
           </tr>
         </tbody>
       </table>
@@ -936,7 +973,30 @@
                             <span x-show="m.electricity_kw"
                                   :class="m.electricity_kw<0?'text-emerald-500':'text-orange-400'"
                                   x-text="'⚡'+Math.abs(+(m.electricity_kw*m.count*(m.efficiency||1)).toFixed(1))"></span>
+                            <span x-show="m.computing_tf"
+                                  :class="m.computing_tf<0?'text-orange-400':'text-cyan-400'"
+                                  x-text="'💻'+Math.abs(+(m.computing_tf*m.count).toFixed(1))+'{{ t('browse.tf_unit') }}'"></span>
                           </span>
+                        </div>
+                      </template>
+                      <!-- Totals -->
+                      <template x-if="c._members && c._members.length">
+                        <div class="pt-1 mt-1 border-t border-slate-200 dark:border-slate-700 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500">
+                          <template x-if="c._members.reduce((s,m)=>s+(m.computing_tf||0)*m.count,0) !== 0">
+                            <span :class="c._members.reduce((s,m)=>s+(m.computing_tf||0)*m.count,0)<0?'text-orange-400':'text-cyan-400'"
+                                  x-text="'💻 '+Math.abs(+(c._members.reduce((s,m)=>s+(m.computing_tf||0)*m.count,0)).toFixed(1))+' {{ t('browse.tf_unit') }}'"></span>
+                          </template>
+                          <template x-if="(()=>{ const t={}; for(const m of c._members||[]) for(const ci of(m.construction||[])) t[ci.item]=(t[ci.item]||0)+ci.qty*m.count; return Object.keys(t).length>0; })()">
+                            <span class="flex items-center gap-1 flex-wrap">
+                              <span>🏗</span>
+                              <template x-for="[item,qty] in Object.entries((()=>{ const t={}; for(const m of c._members||[]) for(const ci of(m.construction||[])) t[ci.item]=(t[ci.item]||0)+ci.qty*m.count; return t; })()).sort()" :key="item">
+                                <span class="flex items-center gap-0.5" :title="item">
+                                  <img :src="iconOf(item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
+                                  <span x-text="Math.ceil(qty)"></span>
+                                </span>
+                              </template>
+                            </span>
+                          </template>
                         </div>
                       </template>
                     </div>

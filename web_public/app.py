@@ -1001,6 +1001,8 @@ def api_nodes():
             result.sort(key=lambda r: abs(r.get("electricity_kw") or 0), reverse=rev)
         elif sort_key == "maintenance":
             result.sort(key=lambda r: _mnt_priority(r.get("maintenance") or []), reverse=rev)
+        elif sort_key == "computing":
+            result.sort(key=lambda r: r.get("computing_tf") or 0, reverse=rev)
 
     total = len(result)
     start = (page - 1) * per_page
@@ -2298,12 +2300,24 @@ def api_complex_members(complex_id: int):
                         COALESCE(r.machine_name, c2.name, '?')                    AS label,
                         cm.multiplier                                              AS count,
                         COALESCE(cm.efficiency, 1.0)                              AS efficiency,
-                        COALESCE(b.workers,        c2.total_workers)              AS workers,
-                        COALESCE(b.electricity_kw, c2.total_electricity_kw)       AS electricity_kw
+                        COALESCE(
+                            b.electricity_kw * COALESCE(r.power_multiplier, 1.0),
+                            c2.total_electricity_kw
+                        )                                                          AS electricity_kw,
+                        b.computing_tf,
+                        COALESCE(b.workers, c2.total_workers)                     AS workers,
+                        constr.items                                               AS construction
                     FROM  complex_members cm
                     LEFT  JOIN recipes   r  ON r.id  = cm.recipe_id
                     LEFT  JOIN buildings b  ON b.id  = r.machine_id
                     LEFT  JOIN complexes c2 ON c2.id = cm.child_complex_id
+                    LEFT  JOIN LATERAL (
+                        SELECT json_agg(
+                            json_build_object('item', bc.item, 'qty', bc.qty)
+                            ORDER BY bc.item
+                        ) AS items
+                        FROM building_construction bc WHERE bc.building_id = b.id
+                    ) constr ON (cm.child_type = 0)
                     WHERE cm.complex_id = %s
                     ORDER BY label
                 """, (complex_id,))
@@ -2312,9 +2326,15 @@ def api_complex_members(complex_id: int):
         result = []
         for row in rows:
             row = dict(row)
-            for f in ('workers', 'electricity_kw', 'efficiency', 'count'):
+            for f in ('workers', 'electricity_kw', 'efficiency', 'count', 'computing_tf'):
                 if row.get(f) is not None and isinstance(row[f], decimal.Decimal):
                     row[f] = float(row[f])
+            # Parse construction JSON
+            v = row.get("construction")
+            if v is None:
+                row["construction"] = []
+            elif isinstance(v, str):
+                row["construction"] = json.loads(v)
             # Перевести имя машины/комплекса на язык пользователя
             if trans and row.get("label"):
                 row["label"] = trans.get(row["label"], row["label"])
