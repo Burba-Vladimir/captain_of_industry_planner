@@ -356,9 +356,9 @@
               <td class="px-3 py-2 text-right tabular-nums text-xs">
                 <span x-show="!node.computing_tf" class="text-slate-200 dark:text-slate-600">—</span>
                 <span x-show="node.computing_tf < 0" class="text-orange-500"
-                      x-text="Math.abs(node.computing_tf)"></span>
+                      x-text="+(Math.abs(node.computing_tf).toFixed(1))"></span>
                 <span x-show="node.computing_tf > 0" class="text-cyan-500"
-                      x-text="node.computing_tf"></span>
+                      x-text="+(node.computing_tf.toFixed(1))"></span>
               </td>
               <td class="px-4 py-2">
                 <div class="flex flex-col gap-0.5">
@@ -529,7 +529,7 @@
                         </p>
                         <p x-show="node.computing_tf && node.computing_tf !== 0">
                           💻 <span :class="node.computing_tf < 0 ? 'text-orange-500' : 'text-cyan-500'"
-                                   x-text="Math.abs(node.computing_tf) + ' {{ t('browse.tf_unit') }}'"></span>
+                                   x-text="+(Math.abs(node.computing_tf).toFixed(1)) + ' {{ t('browse.tf_unit') }}'"></span>
                         </p>
                       </div>
                     </template>
