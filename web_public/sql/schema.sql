@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS complexes (
     description          TEXT,
     total_workers        NUMERIC(12, 2),
     total_electricity_kw NUMERIC(12, 2),
+    total_computing_tf   NUMERIC(12, 4),   -- pre-computed by recalculate_complex (with efficiency)
     created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
     -- user_id, visibility, slug и др. добавляются в разделе 5 (AUTH)
@@ -177,6 +178,17 @@ CREATE TABLE IF NOT EXISTS complex_maintenance (
 
 CREATE INDEX IF NOT EXISTS idx_cx_maint_complex ON complex_maintenance (complex_id);
 
+-- complex_construction: агрегированные стройматериалы (один раз на сборку)
+CREATE TABLE IF NOT EXISTS complex_construction (
+    id         SERIAL  PRIMARY KEY,
+    complex_id INTEGER NOT NULL REFERENCES complexes (id) ON DELETE CASCADE,
+    item       VARCHAR(200) NOT NULL,
+    qty        NUMERIC(12, 4) NOT NULL CHECK (qty > 0),
+    CONSTRAINT uq_complex_construction UNIQUE (complex_id, item)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cx_construction_complex ON complex_construction (complex_id);
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 3. ТРИГГЕРЫ И ФУНКЦИИ (комплексы)
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -218,8 +230,12 @@ FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
 CREATE OR REPLACE FUNCTION recalculate_complex(p_complex_id INTEGER)
 RETURNS VOID LANGUAGE plpgsql AS $$
-DECLARE v_workers NUMERIC(12,2); v_electricity NUMERIC(12,2);
+DECLARE
+    v_workers      NUMERIC(12,2);
+    v_electricity  NUMERIC(12,2);
+    v_computing_tf NUMERIC(12,4);
 BEGIN
+    -- ── Resource flows ────────────────────────────────────────────────────────
     DELETE FROM resource_flows WHERE parent_type = 1 AND parent_id = p_complex_id;
     INSERT INTO resource_flows (parent_type, parent_id, complex_id, item_id, direction, qty_per_min)
     WITH RECURSIVE cx_tree AS (
@@ -244,6 +260,7 @@ BEGIN
            CASE WHEN net_qty > 0 THEN 1 ELSE 0 END, ABS(net_qty)
     FROM resource_flow WHERE net_qty <> 0;
 
+    -- ── Workers + Electricity (physical multiplier, no efficiency) ────────────
     WITH RECURSIVE cx_tree AS (
         SELECT p_complex_id AS cid, 1.0::NUMERIC(12,4) AS eff_mult
         UNION ALL
@@ -262,6 +279,7 @@ BEGIN
 
     UPDATE complexes SET total_workers = v_workers, total_electricity_kw = v_electricity WHERE id = p_complex_id;
 
+    -- ── Maintenance (physical multiplier, no efficiency) ─────────────────────
     DELETE FROM complex_maintenance WHERE complex_id = p_complex_id;
     INSERT INTO complex_maintenance (complex_id, item, rate_per_min)
     WITH RECURSIVE cx_tree AS (
@@ -278,6 +296,45 @@ BEGIN
     SELECT p_complex_id, bm.item, SUM(ar.total_mult * bm.rate_per_min)
     FROM all_recipes ar JOIN recipes r ON r.id = ar.recipe_id
     JOIN building_maintenance bm ON bm.building_id = r.machine_id GROUP BY bm.item;
+
+    -- ── Computing TF (effective: multiplier × efficiency at every level) ──────
+    WITH RECURSIVE cx_tree AS (
+        SELECT p_complex_id AS cid, 1.0::NUMERIC(12,4) AS eff_mult
+        UNION ALL
+        SELECT cm.child_id, (t.eff_mult * cm.multiplier * cm.efficiency)::NUMERIC(12,4)
+        FROM cx_tree t JOIN complex_members cm ON cm.complex_id = t.cid WHERE cm.child_type = 1
+    ),
+    all_recipes AS (
+        SELECT cm.recipe_id, SUM(t.eff_mult * cm.multiplier * cm.efficiency) AS total_mult
+        FROM cx_tree t JOIN complex_members cm ON cm.complex_id = t.cid WHERE cm.child_type = 0
+        GROUP BY cm.recipe_id
+    )
+    SELECT COALESCE(SUM(ar.total_mult * COALESCE(b.computing_tf, 0)), 0)
+    INTO v_computing_tf
+    FROM all_recipes ar JOIN recipes r ON r.id = ar.recipe_id LEFT JOIN buildings b ON b.id = r.machine_id;
+
+    UPDATE complexes SET total_computing_tf = v_computing_tf WHERE id = p_complex_id;
+
+    -- ── Construction (effective: multiplier × efficiency at every level) ──────
+    DELETE FROM complex_construction WHERE complex_id = p_complex_id;
+    INSERT INTO complex_construction (complex_id, item, qty)
+    WITH RECURSIVE cx_tree AS (
+        SELECT p_complex_id AS cid, 1.0::NUMERIC(12,4) AS eff_mult
+        UNION ALL
+        SELECT cm.child_id, (t.eff_mult * cm.multiplier * cm.efficiency)::NUMERIC(12,4)
+        FROM cx_tree t JOIN complex_members cm ON cm.complex_id = t.cid WHERE cm.child_type = 1
+    ),
+    all_recipes AS (
+        SELECT cm.recipe_id, SUM(t.eff_mult * cm.multiplier * cm.efficiency) AS total_mult
+        FROM cx_tree t JOIN complex_members cm ON cm.complex_id = t.cid WHERE cm.child_type = 0
+        GROUP BY cm.recipe_id
+    )
+    SELECT p_complex_id, bc.item, CEIL(SUM(ar.total_mult * bc.qty))
+    FROM all_recipes ar
+    JOIN recipes r  ON r.id  = ar.recipe_id
+    JOIN building_construction bc ON bc.building_id = r.machine_id
+    GROUP BY bc.item
+    HAVING SUM(ar.total_mult * bc.qty) > 0;
 END;
 $$;
 

@@ -647,12 +647,7 @@ SELECT * FROM (
         NULL                                    AS cycle_time_s,
         c.total_workers                         AS workers,
         c.total_electricity_kw                  AS electricity_kw,
-        (SELECT COALESCE(SUM(b_tf.computing_tf * cm_tf.multiplier * cm_tf.efficiency), 0)
-         FROM   complex_members cm_tf
-         JOIN   recipes r_tf   ON r_tf.id   = cm_tf.recipe_id
-         JOIN   buildings b_tf ON b_tf.id   = r_tf.machine_id
-         WHERE  cm_tf.complex_id = c.id
-           AND  cm_tf.child_type = 0)          AS computing_tf,
+        COALESCE(c.total_computing_tf, 0)       AS computing_tf,
         FALSE                                   AS deprecated,
         inp.items                               AS inputs,
         out.items                               AS outputs,
@@ -700,28 +695,9 @@ SELECT * FROM (
     ) mnt_cx ON TRUE
 
     LEFT JOIN LATERAL (
-        SELECT json_agg(json_build_object('item', agg_item, 'qty', CEIL(total_qty)::numeric) ORDER BY agg_item) AS items
-        FROM (
-            SELECT agg_item, SUM(raw_qty) AS total_qty
-            FROM (
-                -- Прямые recipe-члены × efficiency
-                SELECT bc.item AS agg_item, bc.qty * cm3.multiplier * cm3.efficiency AS raw_qty
-                FROM   complex_members cm3
-                JOIN   recipes r3 ON r3.id = cm3.recipe_id
-                JOIN   building_construction bc ON bc.building_id = r3.machine_id
-                WHERE  cm3.complex_id = c.id AND cm3.child_type = 0
-                UNION ALL
-                -- Один уровень sub-complex: внутренний multiplier × внешний scale
-                SELECT bc2.item AS agg_item, bc2.qty * cm_in.multiplier * cm_out.multiplier * cm_out.efficiency AS raw_qty
-                FROM   complex_members cm_out
-                JOIN   complex_members cm_in ON cm_in.complex_id = cm_out.child_complex_id AND cm_in.child_type = 0
-                JOIN   recipes r_in ON r_in.id = cm_in.recipe_id
-                JOIN   building_construction bc2 ON bc2.building_id = r_in.machine_id
-                WHERE  cm_out.complex_id = c.id AND cm_out.child_type = 1
-            ) _combined
-            GROUP BY agg_item
-        ) _summed
-        WHERE total_qty > 0
+        SELECT json_agg(json_build_object('item', cc.item, 'qty', cc.qty) ORDER BY cc.item) AS items
+        FROM   complex_construction cc
+        WHERE  cc.complex_id = c.id
     ) cx_constr ON TRUE
 
     LEFT JOIN LATERAL (
@@ -1243,26 +1219,9 @@ def api_public_complexes():
                                             'rate_per_min', cm2.rate_per_min))
                         FROM complex_maintenance cm2
                         WHERE cm2.complex_id = c.id) AS maintenance,
-                       (SELECT json_agg(json_build_object('item', agg_item, 'qty', CEIL(total_qty)::numeric) ORDER BY agg_item)
-                        FROM (
-                            SELECT agg_item, SUM(raw_qty) AS total_qty
-                            FROM (
-                                SELECT bc.item AS agg_item, bc.qty * cm3.multiplier * cm3.efficiency AS raw_qty
-                                FROM   complex_members cm3
-                                JOIN   recipes r3 ON r3.id = cm3.recipe_id
-                                JOIN   building_construction bc ON bc.building_id = r3.machine_id
-                                WHERE  cm3.complex_id = c.id AND cm3.child_type = 0
-                                UNION ALL
-                                SELECT bc2.item AS agg_item, bc2.qty * cm_in.multiplier * cm_out.multiplier * cm_out.efficiency AS raw_qty
-                                FROM   complex_members cm_out
-                                JOIN   complex_members cm_in ON cm_in.complex_id = cm_out.child_complex_id AND cm_in.child_type = 0
-                                JOIN   recipes r_in ON r_in.id = cm_in.recipe_id
-                                JOIN   building_construction bc2 ON bc2.building_id = r_in.machine_id
-                                WHERE  cm_out.complex_id = c.id AND cm_out.child_type = 1
-                            ) _combined
-                            GROUP BY agg_item
-                        ) _summed
-                        WHERE total_qty > 0) AS construction,
+                       (SELECT json_agg(json_build_object('item', cc.item, 'qty', cc.qty) ORDER BY cc.item)
+                        FROM complex_construction cc
+                        WHERE cc.complex_id = c.id) AS construction,
                        COALESCE((SELECT json_agg(tg.name ORDER BY tg.name)
                         FROM complex_tags ct2
                         JOIN tags tg ON tg.id = ct2.tag_id
@@ -1899,15 +1858,8 @@ def api_complex_graph(complex_id: int):
                     ) constr ON (cm.child_type = 0)
 
                     LEFT JOIN LATERAL (
-                        SELECT json_agg(json_build_object('item', agg_item, 'qty', agg_qty) ORDER BY agg_item) AS items
-                        FROM (
-                            SELECT bc.item AS agg_item, CEIL(SUM(bc.qty * cm2.multiplier))::numeric AS agg_qty
-                            FROM   complex_members cm2
-                            JOIN   recipes r2 ON r2.id = cm2.recipe_id
-                            JOIN   building_construction bc ON bc.building_id = r2.machine_id
-                            WHERE  cm2.complex_id = cm.child_complex_id AND cm2.child_type = 0
-                            GROUP  BY bc.item
-                        ) _cca
+                        SELECT json_agg(json_build_object('item', cc.item, 'qty', cc.qty) ORDER BY cc.item) AS items
+                        FROM complex_construction cc WHERE cc.complex_id = cm.child_complex_id
                     ) constr_cx ON (cm.child_type = 1)
 
                     WHERE cm.complex_id = %s
@@ -2376,14 +2328,7 @@ def api_complex_members(complex_id: int):
                             b.electricity_kw * COALESCE(r.power_multiplier, 1.0),
                             c2.total_electricity_kw
                         )                                                          AS electricity_kw,
-                        COALESCE(b.computing_tf,
-                            (SELECT COALESCE(SUM(b2.computing_tf * cm2.multiplier * cm2.efficiency), 0)
-                             FROM   complex_members cm2
-                             JOIN   recipes r2   ON r2.id   = cm2.recipe_id
-                             JOIN   buildings b2 ON b2.id   = r2.machine_id
-                             WHERE  cm2.complex_id = cm.child_complex_id
-                               AND  cm2.child_type = 0)
-                        )                                                          AS computing_tf,
+                        COALESCE(b.computing_tf, c2.total_computing_tf)           AS computing_tf,
                         COALESCE(b.workers, c2.total_workers)                     AS workers,
                         COALESCE(constr.items, constr_cx.items)                   AS construction
                     FROM  complex_members cm
@@ -2398,15 +2343,8 @@ def api_complex_members(complex_id: int):
                         FROM building_construction bc WHERE bc.building_id = b.id
                     ) constr ON (cm.child_type = 0)
                     LEFT  JOIN LATERAL (
-                        SELECT json_agg(json_build_object('item', agg_item, 'qty', agg_qty) ORDER BY agg_item) AS items
-                        FROM (
-                            SELECT bc.item AS agg_item, CEIL(SUM(bc.qty * cm2.multiplier))::numeric AS agg_qty
-                            FROM   complex_members cm2
-                            JOIN   recipes r2 ON r2.id = cm2.recipe_id
-                            JOIN   building_construction bc ON bc.building_id = r2.machine_id
-                            WHERE  cm2.complex_id = cm.child_complex_id AND cm2.child_type = 0
-                            GROUP  BY bc.item
-                        ) _cca
+                        SELECT json_agg(json_build_object('item', cc.item, 'qty', cc.qty) ORDER BY cc.item) AS items
+                        FROM complex_construction cc WHERE cc.complex_id = cm.child_complex_id
                     ) constr_cx ON (cm.child_type = 1)
                     WHERE cm.complex_id = %s
                     ORDER BY label
