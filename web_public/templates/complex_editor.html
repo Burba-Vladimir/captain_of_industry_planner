@@ -2676,7 +2676,7 @@ function complexEditor(complexId, readOnlyMode) {
         for (const o of (node.outputs||[])) net[o.item]=(net[o.item]||0)+(o.qty_per_min||0)*m;
         for (const i of (node.inputs ||[])) net[i.item]=(net[i.item]||0)-(i.qty_per_min||0)*m;
         for (const x of (node.maintenance||[])) maint[x.item]=(maint[x.item]||0)+(x.rate_per_min||0)*m;
-        for (const c of (node.construction||[])) constr[c.item]=(constr[c.item]||0)+c.qty*m;
+        for (const c of (node.construction||[])) { const k=c.item_en||c.item; if(!constr[k]) constr[k]={d:c.item_display||c.item,q:0}; constr[k].q+=c.qty*m; }
         totalWorkers+=(node.workers||0)*m;
         totalElec   +=(node.electricity_kw||0)*m;
         totalTf     +=(node.computing_tf||0)*m;
@@ -2709,7 +2709,7 @@ function complexEditor(complexId, readOnlyMode) {
         extPortOut: [...extPortOut].sort((a,b)=>a.localeCompare(b)),
         totalWorkers, totalElec, totalTf,
         maintenance:   Object.entries(maint).map(([item,rate])=>({item,rate:+rate.toFixed(3)})).sort((a,b)=>a.item.localeCompare(b.item)),
-        construction:  Object.entries(constr).map(([item,qty])=>({item,qty:Math.ceil(qty)})).sort((a,b)=>a.item.localeCompare(b.item)),
+        construction:  Object.entries(constr).map(([item,v])=>({item,item_display:v.d,qty:Math.ceil(v.q)})).sort((a,b)=>a.item.localeCompare(b.item)),
       };
     },
 
