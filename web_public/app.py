@@ -652,7 +652,7 @@ SELECT * FROM (
         inp.items                               AS inputs,
         out.items                               AS outputs,
         mnt_cx.items                            AS maintenance,
-        NULL::json                              AS construction,
+        cx_constr.items                         AS construction,
         c.slug                                  AS slug,
         c.user_id                               AS owner_id,
         c.visibility::text                      AS visibility,
@@ -693,6 +693,18 @@ SELECT * FROM (
         FROM  complex_maintenance cm2
         WHERE cm2.complex_id = c.id
     ) mnt_cx ON TRUE
+
+    LEFT JOIN LATERAL (
+        SELECT json_agg(json_build_object('item', agg_item, 'qty', agg_qty) ORDER BY agg_item) AS items
+        FROM (
+            SELECT bc.item AS agg_item, CEIL(SUM(bc.qty * cm3.multiplier))::numeric AS agg_qty
+            FROM   complex_members cm3
+            JOIN   recipes r3 ON r3.id = cm3.recipe_id
+            JOIN   building_construction bc ON bc.building_id = r3.machine_id
+            WHERE  cm3.complex_id = c.id AND cm3.child_type = 0
+            GROUP  BY bc.item
+        ) _cca
+    ) cx_constr ON TRUE
 
     LEFT JOIN LATERAL (
         SELECT COALESCE(json_agg(tg.name ORDER BY tg.name), '[]'::json) AS tags
@@ -807,7 +819,7 @@ def _parse_row(row: dict) -> dict:
     if trans:
         if row.get("machine_name"):
             row["machine_name"] = trans.get(row["machine_name"], row["machine_name"])
-        for f in ("inputs", "outputs", "maintenance"):
+        for f in ("inputs", "outputs", "maintenance", "construction"):
             for entry in row[f]:
                 if "item" in entry:
                     entry["item_en"] = entry["item"]
@@ -1213,6 +1225,15 @@ def api_public_complexes():
                                             'rate_per_min', cm2.rate_per_min))
                         FROM complex_maintenance cm2
                         WHERE cm2.complex_id = c.id) AS maintenance,
+                       (SELECT json_agg(json_build_object('item', agg_item, 'qty', agg_qty) ORDER BY agg_item)
+                        FROM (
+                            SELECT bc.item AS agg_item, CEIL(SUM(bc.qty * cm3.multiplier))::numeric AS agg_qty
+                            FROM   complex_members cm3
+                            JOIN   recipes r3 ON r3.id = cm3.recipe_id
+                            JOIN   building_construction bc ON bc.building_id = r3.machine_id
+                            WHERE  cm3.complex_id = c.id AND cm3.child_type = 0
+                            GROUP  BY bc.item
+                        ) _cca) AS construction,
                        COALESCE((SELECT json_agg(tg.name ORDER BY tg.name)
                         FROM complex_tags ct2
                         JOIN tags tg ON tg.id = ct2.tag_id
@@ -1238,8 +1259,17 @@ def api_public_complexes():
         for num_col in ("total_electricity_kw", "total_workers", "likes_count"):
             if isinstance(row.get(num_col), decimal.Decimal):
                 row[num_col] = float(row[num_col])
+        # Always parse and default construction to []
+        c_lst = row.get("construction")
+        if isinstance(c_lst, str):
+            try:
+                c_lst = json.loads(c_lst)
+            except Exception:
+                c_lst = None
+        row["construction"] = c_lst if isinstance(c_lst, list) else []
+
         if trans:
-            for key in ("inputs", "outputs", "maintenance"):
+            for key in ("inputs", "outputs", "maintenance", "construction"):
                 lst = row.get(key)
                 if isinstance(lst, str):
                     try:
@@ -1792,7 +1822,8 @@ def api_complex_graph(complex_id: int):
                         out.items  AS outputs,
                         mnt.items  AS maintenance,
                         mnt_cx.items AS complex_maintenance,
-                        constr.items AS construction
+                        constr.items AS construction,
+                        constr_cx.items AS cx_construction
                     FROM complex_members cm
                     LEFT JOIN recipes   r  ON r.id  = cm.recipe_id
                     LEFT JOIN buildings b  ON b.id  = r.machine_id
@@ -1837,6 +1868,18 @@ def api_complex_graph(complex_id: int):
                             ORDER BY bc.item) AS items
                         FROM building_construction bc WHERE bc.building_id = b.id
                     ) constr ON (cm.child_type = 0)
+
+                    LEFT JOIN LATERAL (
+                        SELECT json_agg(json_build_object('item', agg_item, 'qty', agg_qty) ORDER BY agg_item) AS items
+                        FROM (
+                            SELECT bc.item AS agg_item, CEIL(SUM(bc.qty * cm2.multiplier))::numeric AS agg_qty
+                            FROM   complex_members cm2
+                            JOIN   recipes r2 ON r2.id = cm2.recipe_id
+                            JOIN   building_construction bc ON bc.building_id = r2.machine_id
+                            WHERE  cm2.complex_id = cm.child_complex_id AND cm2.child_type = 0
+                            GROUP  BY bc.item
+                        ) _cca
+                    ) constr_cx ON (cm.child_type = 1)
 
                     WHERE cm.complex_id = %s
                     ORDER BY cm.id
@@ -1910,7 +1953,7 @@ def api_complex_graph(complex_id: int):
                 workers_val  = _f(m["complex_workers"])       if m.get("complex_workers")       is not None else None
                 elec_val     = _f(m["complex_electricity_kw"]) if m.get("complex_electricity_kw") is not None else None
                 computing_val = None
-                constr_list  = []
+                constr_list  = _add_item_display(_parse_json_list(m.get("cx_construction")))
             else:
                 inp_list     = _add_item_display(_parse_json_list(m["inputs"]))
                 out_list     = _add_item_display(_parse_json_list(m["outputs"]))
@@ -1918,7 +1961,7 @@ def api_complex_graph(complex_id: int):
                 workers_val  = _f(m["workers"])       if m["workers"]       is not None else None
                 elec_val     = _f(m["electricity_kw"]) if m["electricity_kw"] is not None else None
                 computing_val = _f(m["computing_tf"])  if m.get("computing_tf") is not None else None
-                constr_list  = _parse_json_list(m.get("construction"))
+                constr_list  = _add_item_display(_parse_json_list(m.get("construction")))
 
             raw_label = m["machine_name"] or m["complex_name"] or "?"
             label = trans.get(raw_label, raw_label) if trans and m["machine_name"] else raw_label
@@ -2306,7 +2349,7 @@ def api_complex_members(complex_id: int):
                         )                                                          AS electricity_kw,
                         b.computing_tf,
                         COALESCE(b.workers, c2.total_workers)                     AS workers,
-                        constr.items                                               AS construction
+                        COALESCE(constr.items, constr_cx.items)                   AS construction
                     FROM  complex_members cm
                     LEFT  JOIN recipes   r  ON r.id  = cm.recipe_id
                     LEFT  JOIN buildings b  ON b.id  = r.machine_id
@@ -2318,6 +2361,17 @@ def api_complex_members(complex_id: int):
                         ) AS items
                         FROM building_construction bc WHERE bc.building_id = b.id
                     ) constr ON (cm.child_type = 0)
+                    LEFT  JOIN LATERAL (
+                        SELECT json_agg(json_build_object('item', agg_item, 'qty', agg_qty) ORDER BY agg_item) AS items
+                        FROM (
+                            SELECT bc.item AS agg_item, CEIL(SUM(bc.qty * cm2.multiplier))::numeric AS agg_qty
+                            FROM   complex_members cm2
+                            JOIN   recipes r2 ON r2.id = cm2.recipe_id
+                            JOIN   building_construction bc ON bc.building_id = r2.machine_id
+                            WHERE  cm2.complex_id = cm.child_complex_id AND cm2.child_type = 0
+                            GROUP  BY bc.item
+                        ) _cca
+                    ) constr_cx ON (cm.child_type = 1)
                     WHERE cm.complex_id = %s
                     ORDER BY label
                 """, (complex_id,))
@@ -2329,12 +2383,13 @@ def api_complex_members(complex_id: int):
             for f in ('workers', 'electricity_kw', 'efficiency', 'count', 'computing_tf'):
                 if row.get(f) is not None and isinstance(row[f], decimal.Decimal):
                     row[f] = float(row[f])
-            # Parse construction JSON
+            # Parse and translate construction JSON
             v = row.get("construction")
             if v is None:
                 row["construction"] = []
             elif isinstance(v, str):
                 row["construction"] = json.loads(v)
+            row["construction"] = _add_item_display(row["construction"])
             # Перевести имя машины/комплекса на язык пользователя
             if trans and row.get("label"):
                 row["label"] = trans.get(row["label"], row["label"])

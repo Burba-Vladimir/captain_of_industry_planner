@@ -592,10 +592,9 @@
         <div x-show="node.construction && node.construction.length"
              class="flex items-center flex-wrap gap-x-2 gap-y-0.5 px-3 py-1
                     border-t border-slate-100 dark:border-slate-700 text-xs text-slate-400">
-          <span class="shrink-0 text-slate-400 dark:text-slate-500 mr-0.5">🏗</span>
           <template x-for="c in (node.construction||[])" :key="c.item">
-            <span class="flex items-center gap-0.5" :title="c.item">
-              <img :src="iconOf(c.item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
+            <span class="flex items-center gap-0.5" :title="c.item_display||c.item">
+              <img :src="iconOf(c.item_en||c.item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
               <span x-text="c.qty"></span>
             </span>
           </template>
@@ -777,10 +776,12 @@
       <span x-text="fmtQty(m.rate)"></span>
     </span>
   </template>
+  <template x-if="summary.construction.length > 0">
+    <span class="text-slate-600 mx-1 select-none">|</span>
+  </template>
   <template x-for="c in summary.construction" :key="c.item">
-    <span class="bg-slate-700/60 rounded px-2 py-0.5 flex items-center gap-1 text-slate-400" :title="'🏗 '+c.item">
-      <span class="text-xs leading-none">🏗</span>
-      <img :src="iconOf(c.item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
+    <span class="bg-slate-700/60 rounded px-2 py-0.5 flex items-center gap-1 text-slate-400" :title="c.item_display||c.item">
+      <img :src="iconOf(c.item_en||c.item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
       <span x-text="c.qty"></span>
     </span>
   </template>
@@ -1199,6 +1200,8 @@ function complexEditor(complexId, readOnlyMode) {
           maintenance:   this.normPickerItems(n.maintenance),
           workers:       n.workers,
           electricity_kw: n.electricity_kw,
+          computing_tf:  n.computing_tf||null,
+          construction:  n.construction||[],
         }];
         this.nodePositions = {[this.nodes[0]._id]: {x: 800, y: 300}};
       } catch(e) { this.error = e.message; }
@@ -2676,7 +2679,7 @@ function complexEditor(complexId, readOnlyMode) {
         for (const c of (node.construction||[])) constr[c.item]=(constr[c.item]||0)+c.qty*(node.count||1);
         totalWorkers+=(node.workers||0)*mW;
         totalElec   +=(node.electricity_kw||0)*m;
-        totalTf     +=(node.computing_tf||0)*(node.count||1);
+        totalTf     +=(node.computing_tf||0)*m;
       }
       // Collect items with explicit external port markers (green ports)
       const extPortIn=new Set(), extPortOut=new Set();

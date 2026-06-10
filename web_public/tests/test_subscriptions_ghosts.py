@@ -406,7 +406,7 @@ class TestShadowFork:
         try:
             c = app.test_client()
             c.get("/")
-            r = c.get("/api/nodes?per_page=500")
+            r = c.get("/api/nodes?per_page=500&type=complex")
             node_ids = [n.get("node_id") for n in r.get_json()["items"]]
             assert ghost_id not in node_ids, "Ghost must not appear in Browse"
         finally:
