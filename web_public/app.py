@@ -1798,8 +1798,9 @@ def api_complex_graph(complex_id: int):
                         b.computing_tf,
                         c2.name             AS complex_name,
                         c2.slug             AS complex_slug,
-                        c2.total_workers    AS complex_workers,
+                        c2.total_workers        AS complex_workers,
                         c2.total_electricity_kw AS complex_electricity_kw,
+                        c2.total_computing_tf   AS complex_computing_tf,
                         c2.user_id          AS complex_owner_id,
                         c2.is_ghost         AS complex_is_ghost,
                         c2.ghost_reason     AS complex_ghost_reason,
@@ -1931,9 +1932,9 @@ def api_complex_graph(complex_id: int):
                 inp_list     = _add_item_display(sf["inputs"])
                 out_list     = _add_item_display(sf["outputs"])
                 mnt_list     = _add_item_display(_parse_json_list(m["complex_maintenance"]))
-                workers_val  = _f(m["complex_workers"])       if m.get("complex_workers")       is not None else None
-                elec_val     = _f(m["complex_electricity_kw"]) if m.get("complex_electricity_kw") is not None else None
-                computing_val = None
+                workers_val  = _f(m["complex_workers"])        if m.get("complex_workers")        is not None else None
+                elec_val     = _f(m["complex_electricity_kw"]) if m.get("complex_electricity_kw")  is not None else None
+                computing_val = _f(m["complex_computing_tf"])  if m.get("complex_computing_tf")    is not None else None
                 constr_list  = _add_item_display(_parse_json_list(m.get("cx_construction")))
             else:
                 inp_list     = _add_item_display(_parse_json_list(m["inputs"]))
