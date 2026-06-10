@@ -2352,7 +2352,14 @@ def api_complex_members(complex_id: int):
                             b.electricity_kw * COALESCE(r.power_multiplier, 1.0),
                             c2.total_electricity_kw
                         )                                                          AS electricity_kw,
-                        b.computing_tf,
+                        COALESCE(b.computing_tf,
+                            (SELECT COALESCE(SUM(b2.computing_tf * cm2.multiplier * cm2.efficiency), 0)
+                             FROM   complex_members cm2
+                             JOIN   recipes r2   ON r2.id   = cm2.recipe_id
+                             JOIN   buildings b2 ON b2.id   = r2.machine_id
+                             WHERE  cm2.complex_id = cm.child_complex_id
+                               AND  cm2.child_type = 0)
+                        )                                                          AS computing_tf,
                         COALESCE(b.workers, c2.total_workers)                     AS workers,
                         COALESCE(constr.items, constr_cx.items)                   AS construction
                     FROM  complex_members cm
