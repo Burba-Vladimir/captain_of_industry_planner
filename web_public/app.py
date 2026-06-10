@@ -1113,6 +1113,8 @@ def api_nodes_for_resource():
 
     result = []
     for row in rows:
+        if row["node_type"] == "recipe":
+            row["_hidden"] = row["node_id"] in hidden_ids
         if not show_hid:
             if row["node_type"] == "recipe" and row["node_id"] in hidden_ids:
                 continue

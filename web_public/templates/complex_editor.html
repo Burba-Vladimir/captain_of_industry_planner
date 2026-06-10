@@ -713,7 +713,7 @@
                 <span class="text-slate-400 truncate max-w-16" x-text="n.author_name||'?'"></span>
               </span>
             </template>
-            <!-- Обычный: рабочие и электричество -->
+            <!-- Обычный: рабочие, электричество, кнопка скрытия -->
             <template x-if="!n.is_community">
               <span class="flex items-center gap-2">
                 <span x-show="n.workers>0" class="text-slate-400">
@@ -723,6 +723,23 @@
                       :class="n.electricity_kw<0?'text-emerald-600':'text-orange-400'">
                   ⚡ <span x-text="Math.abs(n.electricity_kw)"></span>
                 </span>
+                <button x-show="n.node_type==='recipe' && !readOnly"
+                        @click.stop="togglePickerHidden(n)"
+                        :title="n._hidden ? '{{ t('browse.show') }}' : '{{ t('browse.hide') }}'"
+                        :class="n._hidden ? 'text-slate-400' : 'text-slate-200 hover:text-slate-400'"
+                        class="dark:text-slate-500 dark:hover:text-slate-300 transition-colors leading-none">
+                  <!-- hidden: eye with slash -->
+                  <svg x-show="n._hidden" viewBox="0 0 20 20" fill="none" class="w-4 h-4">
+                    <ellipse cx="10" cy="10" rx="7.5" ry="5" stroke="currentColor" stroke-width="1.5"/>
+                    <circle cx="10" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+                    <line x1="3" y1="3" x2="17" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                  </svg>
+                  <!-- visible: plain eye -->
+                  <svg x-show="!n._hidden" viewBox="0 0 20 20" fill="none" class="w-4 h-4">
+                    <ellipse cx="10" cy="10" rx="7.5" ry="5" stroke="currentColor" stroke-width="1.5"/>
+                    <circle cx="10" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+                  </svg>
+                </button>
               </span>
             </template>
           </span>
@@ -1486,6 +1503,27 @@ function complexEditor(complexId, readOnlyMode) {
     },
 
     closePicker() { this.pickerOpen=false; this.pickerContext=null; },
+
+    async togglePickerHidden(node) {
+      const newHidden = !node._hidden;
+      try {
+        const r = await fetch(`/api/node/recipe/${node.node_id}/hidden`, {
+          method: 'PATCH', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({hidden: newHidden}),
+        });
+        if (!r.ok) {
+          const d = await r.json();
+          if (d.error==='login_required') { this.closePicker(); this.openAuth(); return; }
+          throw new Error(d.error||'error');
+        }
+        if (newHidden && !this.pickerShowHidden) {
+          this.pickerNodes = this.pickerNodes.filter(n => n !== node);
+        } else {
+          node._hidden = newHidden;
+          this.pickerNodes = [...this.pickerNodes];
+        }
+      } catch(e) { alert('Error: '+e.message); }
+    },
 
     resourceQty(node, item, direction) {
       if (!item||!direction) return '';
