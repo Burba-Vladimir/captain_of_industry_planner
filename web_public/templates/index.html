@@ -272,7 +272,7 @@
             <th class="px-3 py-2.5 text-right w-20 sortable" @click="sortBy('computing')">
               💻 {{ t('browse.tf_unit') }} <span class="text-slate-300 normal-case" x-text="sortIcon('computing')"></span>
             </th>
-            <th class="px-4 py-2.5 w-36 sortable" @click="sortBy('maintenance')"
+            <th class="px-4 py-2.5 w-20 sortable" @click="sortBy('maintenance')"
                 :title="'{{ t('browse.col_maint') }}'">
               <img :src="iconOf('Maintenance I')" class="w-4 h-4 object-contain inline" @error="$el.style.display='none'">
               <span class="text-slate-300 normal-case" x-text="sortIcon('maintenance')"></span>
