@@ -548,13 +548,13 @@
                                       x-text="'⏸'+Math.round(m.efficiency*100)+'%'"></span>
                               </span>
                               <span class="shrink-0 text-slate-400 flex items-center gap-1.5">
-                                <span x-show="m.workers>0" x-text="'👷'+Math.round(m.workers*m.count)"></span>
+                                <span x-show="m.workers>0" x-text="'👷'+Math.round(m.workers*m.count*(m.efficiency||1))"></span>
                                 <span x-show="m.electricity_kw"
                                       :class="m.electricity_kw<0?'text-emerald-500':'text-orange-400'"
                                       x-text="'⚡'+Math.abs(+(m.electricity_kw*m.count*(m.efficiency||1)).toFixed(1))"></span>
                                 <span x-show="m.computing_tf"
                                       :class="m.computing_tf<0?'text-orange-400':'text-cyan-400'"
-                                      x-text="'💻'+Math.abs(+(m.computing_tf*m.count).toFixed(1))+'{{ t('browse.tf_unit') }}'"></span>
+                                      x-text="'💻'+Math.abs(+(m.computing_tf*m.count*(m.efficiency||1)).toFixed(1))+'{{ t('browse.tf_unit') }}'"></span>
                               </span>
                             </div>
                           </template>
@@ -952,13 +952,13 @@
                                   x-text="'⏸'+Math.round(m.efficiency*100)+'%'"></span>
                           </span>
                           <span class="shrink-0 text-slate-400 flex items-center gap-1.5">
-                            <span x-show="m.workers>0" x-text="'👷'+Math.round(m.workers*m.count)"></span>
+                            <span x-show="m.workers>0" x-text="'👷'+Math.round(m.workers*m.count*(m.efficiency||1))"></span>
                             <span x-show="m.electricity_kw"
                                   :class="m.electricity_kw<0?'text-emerald-500':'text-orange-400'"
                                   x-text="'⚡'+Math.abs(+(m.electricity_kw*m.count*(m.efficiency||1)).toFixed(1))"></span>
                             <span x-show="m.computing_tf"
                                   :class="m.computing_tf<0?'text-orange-400':'text-cyan-400'"
-                                  x-text="'💻'+Math.abs(+(m.computing_tf*m.count).toFixed(1))+'{{ t('browse.tf_unit') }}'"></span>
+                                  x-text="'💻'+Math.abs(+(m.computing_tf*m.count*(m.efficiency||1)).toFixed(1))+'{{ t('browse.tf_unit') }}'"></span>
                           </span>
                         </div>
                       </template>
