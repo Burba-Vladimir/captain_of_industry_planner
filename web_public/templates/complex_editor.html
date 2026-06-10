@@ -566,7 +566,7 @@
         <!-- Stats footer -->
         <div class="flex items-center flex-wrap gap-x-3 gap-y-0.5 px-3 py-1.5
                     border-t border-slate-100 dark:border-slate-700 text-xs text-slate-400">
-          <span x-show="node.workers>0" x-text="'👷 '+nodeIdleCount(node)*node.workers"></span>
+          <span x-show="node.workers>0" x-text="'👷 '+Math.round(nodeEffectiveCount(node)*node.workers)"></span>
           <span x-show="node.electricity_kw && node.electricity_kw!==0"
                 :class="node.electricity_kw<0?'text-emerald-500':'text-orange-400'"
                 x-text="'⚡ '+Math.abs(+(node.electricity_kw*nodeEffectiveCount(node)).toFixed(1))"></span>
@@ -595,7 +595,7 @@
           <template x-for="c in (node.construction||[])" :key="c.item">
             <span class="flex items-center gap-0.5" :title="c.item_display||c.item">
               <img :src="iconOf(c.item_en||c.item)" @error="$el.style.display='none'" class="w-3 h-3 object-contain">
-              <span x-text="Math.ceil(c.qty * Math.ceil(node.count||1))"></span>
+              <span x-text="+(c.qty * nodeEffectiveCount(node)).toFixed(1)"></span>
             </span>
           </template>
         </div>
@@ -2672,12 +2672,12 @@ function complexEditor(complexId, readOnlyMode) {
       const net={},maint={},constr={};
       let totalWorkers=0,totalElec=0,totalTf=0;
       for (const node of this.nodes) {
-        const m=this.nodeEffectiveCount(node), mW=this.hasIdle(node)?this.nodeIdleCount(node):(node.count||1);
+        const m=this.nodeEffectiveCount(node);
         for (const o of (node.outputs||[])) net[o.item]=(net[o.item]||0)+(o.qty_per_min||0)*m;
         for (const i of (node.inputs ||[])) net[i.item]=(net[i.item]||0)-(i.qty_per_min||0)*m;
         for (const x of (node.maintenance||[])) maint[x.item]=(maint[x.item]||0)+(x.rate_per_min||0)*m;
-        for (const c of (node.construction||[])) constr[c.item]=(constr[c.item]||0)+c.qty*Math.ceil(node.count||1);
-        totalWorkers+=(node.workers||0)*mW;
+        for (const c of (node.construction||[])) constr[c.item]=(constr[c.item]||0)+c.qty*m;
+        totalWorkers+=(node.workers||0)*m;
         totalElec   +=(node.electricity_kw||0)*m;
         totalTf     +=(node.computing_tf||0)*m;
       }
