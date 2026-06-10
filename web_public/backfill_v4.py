@@ -44,35 +44,34 @@ def download_json(url: str) -> dict:
 
 
 def _input_items_from_recipe(jr: dict) -> frozenset[str]:
-    """Extract input item names from a JSON recipe object (tries several key shapes)."""
+    """Extract input item names from a JSON recipe object (tries several key shapes).
+    Returns names normalised to lowercase for case-insensitive DB matching.
+    """
+    def _norm(items_raw):
+        return frozenset(
+            (e.get("name") or e.get("product") or e.get("item", "")).lower()
+            for e in items_raw
+            if isinstance(e, dict)
+            and (e.get("name") or e.get("product") or e.get("item"))
+        )
+
     # Shape 1: separate "inputs" list with {"name": ...}
     if "inputs" in jr:
-        items = [
-            e.get("name") or e.get("product") or e.get("item", "")
-            for e in jr["inputs"]
-            if isinstance(e, dict)
-        ]
-        if any(items):
-            return frozenset(filter(None, items))
+        result = _norm(jr["inputs"])
+        if result or jr["inputs"]:   # explicit empty list is valid (no-input recipe)
+            return result
 
     # Shape 2: unified "products" list with a "type" discriminator
     if "products" in jr:
-        items = [
-            e.get("name") or e.get("product") or e.get("item", "")
-            for e in jr["products"]
+        inputs = [
+            e for e in jr["products"]
             if isinstance(e, dict) and e.get("type", "").lower() in ("input", "ingredient", "")
         ]
-        if any(items):
-            return frozenset(filter(None, items))
+        return _norm(inputs)
 
     # Shape 3: "input_products"
     if "input_products" in jr:
-        items = [
-            e.get("name") or e.get("product") or e.get("item", "")
-            for e in jr["input_products"]
-            if isinstance(e, dict)
-        ]
-        return frozenset(filter(None, items))
+        return _norm(jr["input_products"])
 
     return frozenset()
 
@@ -103,7 +102,7 @@ def main() -> None:
     cur = con.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     # ══ Fix 1: computing_tf ═══════════════════════════════════════════════════
-    print("── Fix 1: computing_tf ─────────────────────────────────────────────")
+    print("-- Fix 1: computing_tf -------------------------------------------------")
     cur.execute("SELECT id, name FROM buildings")
     db_buildings: dict[str, int] = {row["name"]: row["id"] for row in cur.fetchall()}
 
@@ -122,7 +121,7 @@ def main() -> None:
         sign = "+" if net_tf > 0 else ""
         print(f"  UPDATE buildings: {name!r}  computing_tf = {sign}{net_tf:g} TF")
 
-    print(f"\n  → {len(computing_updates)} building(s) to update\n")
+    print(f"\n  -> {len(computing_updates)} building(s) to update\n")
 
     if not dry_run and computing_updates:
         cur.executemany(
@@ -131,7 +130,7 @@ def main() -> None:
         )
 
     # ══ Fix 3: power_multiplier ═══════════════════════════════════════════════
-    print("── Fix 3: power_multiplier ─────────────────────────────────────────")
+    print("-- Fix 3: power_multiplier ---------------------------------------------")
 
     # Fetch all DB recipes with their input items for matching
     cur.execute("""
@@ -149,14 +148,23 @@ def main() -> None:
     """)
     db_recipe_rows = cur.fetchall()
 
-    # Build lookup:  machine_name → list of (recipe_id, frozenset[item_name])
+    # Build lookup:  machine_name -> list of (recipe_id, frozenset[item_name_lower])
+    # Item names are normalised to lowercase for case-insensitive matching against
+    # captain-of-data (which uses lowercase: "Iron scrap" vs DB "Iron Scrap").
     machine_recipes: dict[str, list[tuple[int, frozenset[str]]]] = defaultdict(list)
     for row in db_recipe_rows:
         raw_inputs = row["input_items"]
         if isinstance(raw_inputs, str):
             raw_inputs = json.loads(raw_inputs)
-        item_set: frozenset[str] = frozenset(filter(None, raw_inputs or []))
+        item_set: frozenset[str] = frozenset(
+            s.lower() for s in filter(None, raw_inputs or [])
+        )
         machine_recipes[row["machine_name"]].append((row["recipe_id"], item_set))
+
+    # Build a case-insensitive lookup: lower(machine_name) → list of (recipe_id, inputs)
+    machine_recipes_ci: dict[str, list[tuple[int, frozenset[str]]]] = defaultdict(list)
+    for name, entries in machine_recipes.items():
+        machine_recipes_ci[name.lower()].extend(entries)
 
     power_updates: list[tuple[float, int]] = []
     unmatched: list[tuple[str, frozenset, float]] = []
@@ -167,6 +175,15 @@ def main() -> None:
         if not json_recipes:
             continue
 
+        # Case-insensitive name lookup; also try stripping parenthetical suffix
+        # e.g. "Boiler (electric)" -> try "Boiler (electric)" then "Boiler"
+        name_lower = machine_name.lower()
+        candidates = machine_recipes_ci.get(name_lower, [])
+        if not candidates:
+            # Try prefix match: "Boiler (electric)" → "boiler"
+            base = name_lower.split("(")[0].strip()
+            candidates = machine_recipes_ci.get(base, [])
+
         for jr in json_recipes:
             pm_raw = jr.get("power_multiplier")
             if pm_raw is None:
@@ -176,13 +193,15 @@ def main() -> None:
                 continue
 
             json_inputs = _input_items_from_recipe(jr)
-            candidates  = machine_recipes.get(machine_name, [])
 
             matched_id: int | None = None
             for recipe_id, db_inputs in candidates:
-                # Exact match or json inputs ⊆ db inputs (accounts for
-                # captain-of-data omitting some secondary inputs)
-                if json_inputs == db_inputs or (json_inputs and json_inputs.issubset(db_inputs)):
+                # Exact match (handles both empty and non-empty inputs),
+                # or json_inputs ⊆ db_inputs (captain-of-data may omit some inputs)
+                if json_inputs == db_inputs:
+                    matched_id = recipe_id
+                    break
+                if json_inputs and json_inputs.issubset(db_inputs):
                     matched_id = recipe_id
                     break
 
@@ -195,9 +214,9 @@ def main() -> None:
             else:
                 unmatched.append((machine_name, json_inputs, pm))
 
-    print(f"\n  → {len(power_updates)} recipe(s) to update")
+    print(f"\n  -> {len(power_updates)} recipe(s) to update")
     if unmatched:
-        print(f"  → {len(unmatched)} unmatched recipe(s):")
+        print(f"  -> {len(unmatched)} unmatched recipe(s):")
         for mn, inp, pm in unmatched:
             print(f"      {mn!r}  inputs={sorted(inp)!r}  pm={pm}")
     print()
@@ -213,7 +232,7 @@ def main() -> None:
         print("DRY RUN — no changes written to database.")
     else:
         con.commit()
-        print("✓ Changes committed to database.")
+        print("OK Changes committed to database.")
 
     cur.close()
     con.close()
