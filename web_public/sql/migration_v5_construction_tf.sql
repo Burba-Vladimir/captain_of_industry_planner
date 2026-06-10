@@ -39,11 +39,11 @@ BEGIN
     WITH RECURSIVE cx_tree AS (
         SELECT p_complex_id AS cid, 1.0::NUMERIC(12,4) AS eff_mult
         UNION ALL
-        SELECT cm.child_id, (t.eff_mult * cm.multiplier)::NUMERIC(12,4)
+        SELECT cm.child_id, (t.eff_mult * cm.multiplier * cm.efficiency)::NUMERIC(12,4)
         FROM cx_tree t JOIN complex_members cm ON cm.complex_id = t.cid WHERE cm.child_type = 1
     ),
     all_recipes AS (
-        SELECT cm.recipe_id, SUM(t.eff_mult * cm.multiplier) AS total_mult
+        SELECT cm.recipe_id, SUM(t.eff_mult * cm.multiplier * cm.efficiency) AS total_mult
         FROM cx_tree t JOIN complex_members cm ON cm.complex_id = t.cid WHERE cm.child_type = 0
         GROUP BY cm.recipe_id
     ),
@@ -62,11 +62,11 @@ BEGIN
     WITH RECURSIVE cx_tree AS (
         SELECT p_complex_id AS cid, 1.0::NUMERIC(12,4) AS eff_mult
         UNION ALL
-        SELECT cm.child_id, (t.eff_mult * cm.multiplier)::NUMERIC(12,4)
+        SELECT cm.child_id, (t.eff_mult * cm.multiplier * cm.efficiency)::NUMERIC(12,4)
         FROM cx_tree t JOIN complex_members cm ON cm.complex_id = t.cid WHERE cm.child_type = 1
     ),
     all_recipes AS (
-        SELECT cm.recipe_id, SUM(t.eff_mult * cm.multiplier) AS total_mult
+        SELECT cm.recipe_id, SUM(t.eff_mult * cm.multiplier * cm.efficiency) AS total_mult
         FROM cx_tree t JOIN complex_members cm ON cm.complex_id = t.cid WHERE cm.child_type = 0
         GROUP BY cm.recipe_id
     )
@@ -83,11 +83,11 @@ BEGIN
     WITH RECURSIVE cx_tree AS (
         SELECT p_complex_id AS cid, 1.0::NUMERIC(12,4) AS eff_mult
         UNION ALL
-        SELECT cm.child_id, (t.eff_mult * cm.multiplier)::NUMERIC(12,4)
+        SELECT cm.child_id, (t.eff_mult * cm.multiplier * cm.efficiency)::NUMERIC(12,4)
         FROM cx_tree t JOIN complex_members cm ON cm.complex_id = t.cid WHERE cm.child_type = 1
     ),
     all_recipes AS (
-        SELECT cm.recipe_id, SUM(t.eff_mult * cm.multiplier) AS total_mult
+        SELECT cm.recipe_id, SUM(t.eff_mult * cm.multiplier * cm.efficiency) AS total_mult
         FROM cx_tree t JOIN complex_members cm ON cm.complex_id = t.cid WHERE cm.child_type = 0
         GROUP BY cm.recipe_id
     )
