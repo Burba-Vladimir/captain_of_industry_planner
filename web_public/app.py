@@ -700,15 +700,28 @@ SELECT * FROM (
     ) mnt_cx ON TRUE
 
     LEFT JOIN LATERAL (
-        SELECT json_agg(json_build_object('item', agg_item, 'qty', agg_qty) ORDER BY agg_item) AS items
+        SELECT json_agg(json_build_object('item', agg_item, 'qty', CEIL(total_qty)::numeric) ORDER BY agg_item) AS items
         FROM (
-            SELECT bc.item AS agg_item, CEIL(SUM(bc.qty * cm3.multiplier))::numeric AS agg_qty
-            FROM   complex_members cm3
-            JOIN   recipes r3 ON r3.id = cm3.recipe_id
-            JOIN   building_construction bc ON bc.building_id = r3.machine_id
-            WHERE  cm3.complex_id = c.id AND cm3.child_type = 0
-            GROUP  BY bc.item
-        ) _cca
+            SELECT agg_item, SUM(raw_qty) AS total_qty
+            FROM (
+                -- Прямые recipe-члены × efficiency
+                SELECT bc.item AS agg_item, bc.qty * cm3.multiplier * cm3.efficiency AS raw_qty
+                FROM   complex_members cm3
+                JOIN   recipes r3 ON r3.id = cm3.recipe_id
+                JOIN   building_construction bc ON bc.building_id = r3.machine_id
+                WHERE  cm3.complex_id = c.id AND cm3.child_type = 0
+                UNION ALL
+                -- Один уровень sub-complex: внутренний multiplier × внешний scale
+                SELECT bc2.item AS agg_item, bc2.qty * cm_in.multiplier * cm_out.multiplier * cm_out.efficiency AS raw_qty
+                FROM   complex_members cm_out
+                JOIN   complex_members cm_in ON cm_in.complex_id = cm_out.child_complex_id AND cm_in.child_type = 0
+                JOIN   recipes r_in ON r_in.id = cm_in.recipe_id
+                JOIN   building_construction bc2 ON bc2.building_id = r_in.machine_id
+                WHERE  cm_out.complex_id = c.id AND cm_out.child_type = 1
+            ) _combined
+            GROUP BY agg_item
+        ) _summed
+        WHERE total_qty > 0
     ) cx_constr ON TRUE
 
     LEFT JOIN LATERAL (
@@ -1230,15 +1243,26 @@ def api_public_complexes():
                                             'rate_per_min', cm2.rate_per_min))
                         FROM complex_maintenance cm2
                         WHERE cm2.complex_id = c.id) AS maintenance,
-                       (SELECT json_agg(json_build_object('item', agg_item, 'qty', agg_qty) ORDER BY agg_item)
+                       (SELECT json_agg(json_build_object('item', agg_item, 'qty', CEIL(total_qty)::numeric) ORDER BY agg_item)
                         FROM (
-                            SELECT bc.item AS agg_item, CEIL(SUM(bc.qty * cm3.multiplier))::numeric AS agg_qty
-                            FROM   complex_members cm3
-                            JOIN   recipes r3 ON r3.id = cm3.recipe_id
-                            JOIN   building_construction bc ON bc.building_id = r3.machine_id
-                            WHERE  cm3.complex_id = c.id AND cm3.child_type = 0
-                            GROUP  BY bc.item
-                        ) _cca) AS construction,
+                            SELECT agg_item, SUM(raw_qty) AS total_qty
+                            FROM (
+                                SELECT bc.item AS agg_item, bc.qty * cm3.multiplier * cm3.efficiency AS raw_qty
+                                FROM   complex_members cm3
+                                JOIN   recipes r3 ON r3.id = cm3.recipe_id
+                                JOIN   building_construction bc ON bc.building_id = r3.machine_id
+                                WHERE  cm3.complex_id = c.id AND cm3.child_type = 0
+                                UNION ALL
+                                SELECT bc2.item AS agg_item, bc2.qty * cm_in.multiplier * cm_out.multiplier * cm_out.efficiency AS raw_qty
+                                FROM   complex_members cm_out
+                                JOIN   complex_members cm_in ON cm_in.complex_id = cm_out.child_complex_id AND cm_in.child_type = 0
+                                JOIN   recipes r_in ON r_in.id = cm_in.recipe_id
+                                JOIN   building_construction bc2 ON bc2.building_id = r_in.machine_id
+                                WHERE  cm_out.complex_id = c.id AND cm_out.child_type = 1
+                            ) _combined
+                            GROUP BY agg_item
+                        ) _summed
+                        WHERE total_qty > 0) AS construction,
                        COALESCE((SELECT json_agg(tg.name ORDER BY tg.name)
                         FROM complex_tags ct2
                         JOIN tags tg ON tg.id = ct2.tag_id
