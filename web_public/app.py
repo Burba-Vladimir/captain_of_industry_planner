@@ -647,7 +647,12 @@ SELECT * FROM (
         NULL                                    AS cycle_time_s,
         c.total_workers                         AS workers,
         c.total_electricity_kw                  AS electricity_kw,
-        NULL::numeric                           AS computing_tf,
+        (SELECT COALESCE(SUM(b_tf.computing_tf * cm_tf.multiplier), 0)
+         FROM   complex_members cm_tf
+         JOIN   recipes r_tf   ON r_tf.id   = cm_tf.recipe_id
+         JOIN   buildings b_tf ON b_tf.id   = r_tf.machine_id
+         WHERE  cm_tf.complex_id = c.id
+           AND  cm_tf.child_type = 0)          AS computing_tf,
         FALSE                                   AS deprecated,
         inp.items                               AS inputs,
         out.items                               AS outputs,
