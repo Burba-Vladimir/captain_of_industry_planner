@@ -537,7 +537,8 @@
                 <button class="port-btn"
                         :class="portBalance(node, inp.item, 'input')"
                         :title="'{{ t('editor.producers') }}: ' + (inp.item_display||inp.item)"
-                        @click.stop="openPicker(node, inp.item, 'produces')"></button>
+                        @click.stop="openPicker(node, inp.item, 'produces')"
+                        @dblclick.stop="quickTogglePort(node, inp.item, 'input')"></button>
                 <img :src="iconOf(inp.item)" @error="$el.style.display='none'" class="port-icon">
                 <span class="port-item" x-text="inp.item_display||inp.item"></span>
                 <span class="port-qty" x-text="fmtQty(inp.scaled)"></span>
@@ -552,7 +553,8 @@
                 <button class="port-btn"
                         :class="portBalance(node, out.item, 'output')"
                         :title="'{{ t('editor.consumers') }}: ' + (out.item_display||out.item)"
-                        @click.stop="openPicker(node, out.item, 'consumes')"></button>
+                        @click.stop="openPicker(node, out.item, 'consumes')"
+                        @dblclick.stop="quickTogglePort(node, out.item, 'output')"></button>
                 <img :src="iconOf(out.item)" @error="$el.style.display='none'" class="port-icon">
                 <span class="port-item" x-text="out.item_display||out.item"></span>
                 <span class="port-qty" x-text="fmtQty(out.scaled)"></span>
@@ -723,7 +725,7 @@
                       :class="n.electricity_kw<0?'text-emerald-600':'text-orange-400'">
                   ⚡ <span x-text="Math.abs(n.electricity_kw)"></span>
                 </span>
-                <button x-show="n.node_type==='recipe' && !readOnly"
+                <button x-show="(n.node_type==='recipe' || n.node_type==='complex') && !readOnly && !n.is_community"
                         @click.stop="togglePickerHidden(n)"
                         :title="n._hidden ? '{{ t('browse.show') }}' : '{{ t('browse.hide') }}'"
                         :class="n._hidden ? 'text-slate-400' : 'text-slate-200 hover:text-slate-400'"
@@ -1507,7 +1509,7 @@ function complexEditor(complexId, readOnlyMode) {
     async togglePickerHidden(node) {
       const newHidden = !node._hidden;
       try {
-        const r = await fetch(`/api/node/recipe/${node.node_id}/hidden`, {
+        const r = await fetch(`/api/node/${node.node_type}/${node.node_id}/hidden`, {
           method: 'PATCH', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({hidden: newHidden}),
         });
@@ -1587,6 +1589,8 @@ function complexEditor(complexId, readOnlyMode) {
           count:         autoCount,
           pos_x: freeX, pos_y: freeY,
           label:         picked.machine_name||picked.name||'?',
+          node_ref_slug: picked.node_type === 'complex' ? (picked.slug || null) : null,
+          owner_id:      picked.node_type === 'complex' ? (picked.owner_id || null) : null,
           inputs:        normInputs,
           outputs:       normOutputs,
           maintenance:   normMaint,
@@ -1868,6 +1872,28 @@ function complexEditor(complexId, readOnlyMode) {
       return this.portBalance(node, this.pickerContext.item, dir)==='unbalanced';
     },
 
+    // Double-click shortcut: если порт соединён — переключает idle, иначе — external.
+    quickTogglePort(node, item, rawDir) {
+      if (this.readOnly) return;
+      this.closePicker();
+      const pickerDir = rawDir === 'input' ? 'produces' : 'consumes';
+      const isConnected = rawDir === 'input'
+        ? this.edges.some(e => e.to_node_id   === node._id && e.resource_item === item)
+        : this.edges.some(e => e.from_node_id === node._id && e.resource_item === item);
+      this.pickerContext = {node_id: node._id, item, direction: pickerDir, item_display: item};
+      if (isConnected) {
+        if (this._isPickerPortIdle()) {
+          this.removeIdle();
+        } else if (this._isPickerPortOkForIdle()) {
+          this.markIdle();
+        } else {
+          this.pickerContext = null;
+        }
+      } else {
+        this.markExternal();
+      }
+    },
+
     _addEdgeIfNew(fromId, toId, item) {
       if (!this.edges.some(e=>e.from_node_id===fromId&&e.to_node_id===toId&&e.resource_item===item)) {
         this.edges = [...this.edges, {_id:genUid(),id:null,from_node_id:fromId,to_node_id:toId,resource_item:item,lcm_mode:false}];
@@ -2043,6 +2069,47 @@ function complexEditor(complexId, readOnlyMode) {
           base[nid] = prodK / g;
         }
       }
+
+      // Fan-out коррекция: если от узла-производителя идёт несколько LCM-рёбер
+      // одного ресурса к разным потребителям, производитель должен покрыть
+      // суммарный спрос всех потребителей одновременно.
+      for (const nid of Object.keys(ratios)) {
+        const prodNode = this.nodes.find(n => n._id === nid);
+        if (!prodNode) continue;
+        const byRes = {};
+        for (const e of lcmEdges) {
+          if (e.from_node_id !== nid || !ratios[e.to_node_id]) continue;
+          const tN = this.nodes.find(n => n._id === e.to_node_id);
+          if (!tN) continue;
+          const rate = (tN.inputs||[]).find(i => i.item === e.resource_item)?.qty_per_min || 0;
+          if (!rate) continue;
+          (byRes[e.resource_item] = byRes[e.resource_item]||[]).push({nid: e.to_node_id, rate});
+        }
+        for (const [resource, consumers] of Object.entries(byRes)) {
+          if (consumers.length < 2) continue; // одиночный потребитель — всё верно
+          const prodRate = (prodNode.outputs||[]).find(o => o.item === resource)?.qty_per_min || 0;
+          if (!prodRate) continue;
+          const demandK = consumers.reduce((s, c) => s + (base[c.nid] || 1) * Math.round(c.rate * 1000), 0);
+          const prodK   = Math.round(prodRate * 1000);
+          const g       = gcd(demandK, prodK);
+          const scale   = prodK / g;
+          if (scale > 1) {
+            for (const key of Object.keys(base)) {
+              if (key === nid) continue;
+              base[key] = (base[key] || 1) * scale;
+            }
+          }
+          base[nid] = demandK / g;
+        }
+      }
+
+      // Финальная минимизация: делим все счётчики на их НОД.
+      const vals = Object.values(base);
+      if (vals.length > 0) {
+        const gAll = vals.reduce((a, b) => gcd(a, b));
+        if (gAll > 1) for (const key of Object.keys(base)) base[key] = base[key] / gAll;
+      }
+
       return base;
     },
 

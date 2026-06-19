@@ -411,7 +411,7 @@
               <td class="px-2 py-2 text-center whitespace-nowrap" @click.stop>
                 <!-- Создать комплекс на основе рецепта -->
                 <a x-show="node.node_type==='recipe'"
-                   :href="'/complex/new?from_type=recipe&from_id=' + node.node_id"
+                   :href="'/complex/new?from_type=recipe&from_id=' + node.node_id + '&back=' + encodeURIComponent(location.pathname+location.search)"
                    class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
                    :title="'{{ t('browse.new_from_recipe') }}'">
                   <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
@@ -424,7 +424,7 @@
                 </a>
                 <!-- Создать новый комплекс с этим в качестве основы -->
                 <a x-show="node.node_type==='complex'"
-                   :href="'/complex/new?from_type=complex&from_id=' + node.node_id"
+                   :href="'/complex/new?from_type=complex&from_id=' + node.node_id + '&back=' + encodeURIComponent(location.pathname+location.search)"
                    class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
                    :title="'{{ t('browse.new_from_complex') }}'">
                   <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
@@ -603,7 +603,6 @@
                             <span x-text="it.item" class="dark:text-slate-300 group-hover:text-blue-600"></span>
                           </span>
                           <span class="tabular-nums shrink-0 text-slate-400">
-                            <span x-show="it.qty_per_cycle!=null" x-text="it.qty_per_cycle+'/c · '"></span>
                             <span x-show="it.qty_per_min!=null" x-text="it.qty_per_min+jt('editor.per_min')"></span>
                           </span>
                         </div>
@@ -621,7 +620,6 @@
                             <span x-text="it.item" class="dark:text-slate-300 group-hover:text-blue-600"></span>
                           </span>
                           <span class="tabular-nums shrink-0 text-slate-400">
-                            <span x-show="it.qty_per_cycle!=null" x-text="it.qty_per_cycle+'/c · '"></span>
                             <span x-show="it.qty_per_min!=null" x-text="it.qty_per_min+jt('editor.per_min')"></span>
                           </span>
                         </div>
@@ -675,7 +673,7 @@
                 :class="communitySort==='popular' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600'"
                 class="px-3 py-1.5 transition-colors border-l border-slate-200 dark:border-slate-600" x-text="'♥ ' + jt('community.sort_popular')"></button>
       </div>
-      <span class="text-xs text-slate-400 dark:text-slate-500" x-text="jt('community.total', {n: communityTotal})"></span>
+      <span class="ml-auto text-xs text-slate-400 dark:text-slate-500" x-text="jt('community.total', {n: communityTotal})"></span>
       <button @click="loadCommunity()"
               class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 dark:text-slate-500
                      hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
@@ -1176,6 +1174,7 @@
     <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">{{ t('auth.not_logged_in') }}</p>
 
     <div class="space-y-3">
+      {% if google_enabled %}
       <!-- Google -->
       <a href="/auth/google/login"
          class="flex items-center gap-3 w-full px-4 py-3 border border-slate-200 dark:border-slate-600
@@ -1189,7 +1188,9 @@
         </svg>
         {{ t('auth.sign_in_with_google') }}
       </a>
+      {% endif %}
 
+      {% if steam_enabled %}
       <!-- Steam -->
       <a href="/auth/steam/login"
          class="flex items-center gap-3 w-full px-4 py-3 bg-[#1b2838] hover:bg-[#2a475e]
@@ -1199,6 +1200,7 @@
         </svg>
         {{ t('auth.sign_in_with_steam') }}
       </a>
+      {% endif %}
 
       <!-- Email auth -->
       <div class="border border-slate-200 dark:border-slate-600 rounded-xl p-4">

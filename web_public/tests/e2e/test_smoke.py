@@ -8,6 +8,11 @@ Smoke E2E тесты CoI Planner.
      сохранение обновляет URL на /complex/<uuid>/edit.
 
 Запуск:
+    # 1. Поднять сервер БЕЗ reloader'а (иначе watchdog следит за site-packages и
+    #    перезапускает сервер посреди теста, когда pytest трогает файлы playwright):
+    flask run --port 5001 --no-reload
+    #    или: python -c "from app import app; app.run(port=5001, use_reloader=False)"
+    # 2. В другом терминале:
     pytest tests/e2e/ -v
     pytest tests/e2e/ -v --headed          # с видимым браузером
     pytest tests/e2e/ -v --base-url http://localhost:5001

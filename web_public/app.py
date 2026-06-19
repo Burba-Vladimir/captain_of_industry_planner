@@ -280,6 +280,13 @@ app.json = _ISOJSONProvider(app)
 app.secret_key = os.environ["SECRET_KEY"]
 app.permanent_session_lifetime = timedelta(days=30)   # сессия живёт 30 дней после закрытия браузера
 
+# За обратным прокси (Nginx) доверяем X-Forwarded-* — иначе request.url/host_url
+# и _external=True (OAuth-редиректы, og:url) формируются с http и внутренним хостом.
+# Включается только в проде: TRUST_PROXY=1 в .env.
+if os.environ.get("TRUST_PROXY") == "1":
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
 # OAuth
 init_oauth(app)
 app.register_blueprint(auth_bp)
@@ -300,7 +307,7 @@ limiter.limit("10 per hour")(app.view_functions["auth.email_verify"])
 limiter.limit("10 per hour")(app.view_functions["auth.login_with_code"])
 
 # ── Лимиты комплексов ─────────────────────────────────────────
-MAX_COMPLEXES       = int(os.environ.get("MAX_COMPLEXES_PER_USER", "30"))
+MAX_COMPLEXES       = int(os.environ.get("MAX_COMPLEXES_PER_USER", "0"))  # 0 = без лимита
 # Гости: не более N комплексов с одного IP или fingerprint за 30 дней
 GUEST_MAX_PER_IP    = int(os.environ.get("GUEST_MAX_COMPLEXES_PER_IP", "10"))
 GUEST_MAX_PER_FP    = int(os.environ.get("GUEST_MAX_COMPLEXES_PER_FP", "10"))
@@ -408,14 +415,26 @@ app.jinja_env.globals["t"] = t
 app.jinja_env.globals["current_user"] = lambda: g.get("user")
 
 
+# Доступность OAuth-провайдеров вычисляется один раз при старте по наличию credentials.
+# Google регистрируется в init_oauth() только при заданных id+secret — без них роут
+# /auth/google/login упал бы с 500, поэтому кнопку прячем. Steam-вход технически
+# работает и без ключа, но без него имя берётся как "Steam:xxxxxxxx" — поэтому
+# показываем кнопку только когда ключ задан.
+GOOGLE_ENABLED = bool(os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET"))
+STEAM_ENABLED  = bool(os.environ.get("STEAM_API_KEY"))
+
+
 @app.context_processor
 def inject_template_globals():
-    """Вставить lang, theme, i18n и user в каждый шаблон."""
+    """Вставить lang, theme, i18n, user и флаги OAuth в каждый шаблон."""
     lang  = getattr(g, "lang",  "en")
     theme = getattr(g, "theme", "light")
     i18n  = _translations.get(lang) or _translations.get("en", {})
     user  = g.get("user")
-    return {"lang": lang, "theme": theme, "i18n": i18n, "user": user}
+    return {
+        "lang": lang, "theme": theme, "i18n": i18n, "user": user,
+        "google_enabled": GOOGLE_ENABLED, "steam_enabled": STEAM_ENABLED,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -497,6 +516,17 @@ def _get_hidden_recipe_ids(user_id: int) -> set[int]:
             return {row[0] for row in cur.fetchall()}
 
 
+def _get_hidden_complex_ids(user_id: int) -> set[int]:
+    """Возвращает множество complex_id, скрытых данным пользователем."""
+    with get_db() as con:
+        with con.cursor() as cur:
+            cur.execute(
+                "SELECT complex_id FROM user_complex_prefs WHERE user_id = %s AND hidden = TRUE",
+                (user_id,),
+            )
+            return {row[0] for row in cur.fetchall()}
+
+
 @app.route("/api/node/<node_type>/<int:node_id>/hidden", methods=["PATCH"])
 def toggle_hidden(node_type: str, node_id: int):
     if node_type not in ("recipe", "complex"):
@@ -519,9 +549,14 @@ def toggle_hidden(node_type: str, node_id: int):
                 """, (user_id, node_id, hidden))
             con.commit()
     else:
-        # Комплексы не имеют поля deprecated — скрытие через удаление из Browse
-        # (комплекс виден только владельцу, поэтому отдельный hide не нужен)
-        pass
+        with get_db() as con:
+            with con.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO user_complex_prefs (user_id, complex_id, hidden)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, complex_id) DO UPDATE SET hidden = EXCLUDED.hidden
+                """, (user_id, node_id, hidden))
+            con.commit()
     return jsonify({"ok": True})
 
 
@@ -546,7 +581,12 @@ def batch_hidden():
                     VALUES (%s, %s, %s)
                     ON CONFLICT (user_id, recipe_id) DO UPDATE SET hidden = EXCLUDED.hidden
                 """, (user_id, rid, hidden))
-            # Комплексы не имеют поля deprecated — batch hide только для рецептов
+            for cid in complex_ids:
+                cur.execute("""
+                    INSERT INTO user_complex_prefs (user_id, complex_id, hidden)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, complex_id) DO UPDATE SET hidden = EXCLUDED.hidden
+                """, (user_id, cid, hidden))
         con.commit()
     return jsonify({"ok": True})
 
@@ -843,9 +883,12 @@ def about():
 
 @app.route("/complex/new")
 def complex_new():
+    back = request.args.get('back', '')
+    from_page = back if (back and back.startswith('/')) else '/'
     return render_template("complex_editor.html",
                            complex_id="null",
                            readonly=False,
+                           from_page=from_page,
                            user=g.get("user"))
 
 
@@ -970,7 +1013,8 @@ def api_nodes():
     per_page    = min(100, max(10, int(request.args.get("per_page", "50"))))
     search_ast  = _parse_search(q_raw)
 
-    hidden_ids: set[int] = _get_hidden_recipe_ids(g.user["id"])
+    hidden_ids:         set[int] = _get_hidden_recipe_ids(g.user["id"])
+    hidden_complex_ids: set[int] = _get_hidden_complex_ids(g.user["id"])
 
     nodes_sql, nodes_params = _make_nodes_sql(g.user["id"])
     try:
@@ -987,6 +1031,8 @@ def api_nodes():
             continue
         if row["node_type"] == "recipe":
             row["deprecated"] = row["node_id"] in hidden_ids
+        elif row["node_type"] == "complex":
+            row["deprecated"] = row["node_id"] in hidden_complex_ids
         if not show_hidden and row["deprecated"]:
             continue
         if search_ast and not _eval_search(search_ast, row):
@@ -1100,7 +1146,8 @@ def api_nodes_for_resource():
         return jsonify(result)
 
     # ── Обычный режим: свои рецепты + свои комплексы + подписки ──
-    hidden_ids: set[int] = _get_hidden_recipe_ids(g.user["id"])
+    hidden_ids:         set[int] = _get_hidden_recipe_ids(g.user["id"])
+    hidden_complex_ids: set[int] = _get_hidden_complex_ids(g.user["id"])
 
     nodes_sql, nodes_params = _make_nodes_sql(g.user["id"])
     try:
@@ -1115,10 +1162,12 @@ def api_nodes_for_resource():
     for row in rows:
         if row["node_type"] == "recipe":
             row["_hidden"] = row["node_id"] in hidden_ids
+        elif row["node_type"] == "complex":
+            row["_hidden"] = row["node_id"] in hidden_complex_ids
         if not show_hid:
             if row["node_type"] == "recipe" and row["node_id"] in hidden_ids:
                 continue
-            if row["node_type"] == "complex" and row["deprecated"]:
+            if row["node_type"] == "complex" and row["node_id"] in hidden_complex_ids:
                 continue
         if type_flt != "all" and row["node_type"] != type_flt:
             continue
@@ -1617,7 +1666,7 @@ def api_complex_fork(complex_id: int):
                     (g.user["id"],),
                 )
                 count = cur.fetchone()[0]
-        if count >= MAX_COMPLEXES:
+        if MAX_COMPLEXES and count >= MAX_COMPLEXES:
             return jsonify({
                 "error":   "limit_reached",
                 "limit":   MAX_COMPLEXES,
@@ -2238,7 +2287,7 @@ def api_complex_create():
         with get_db() as con:
             with con.cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM complexes WHERE user_id = %s", (user["id"],))
-                if cur.fetchone()[0] >= MAX_COMPLEXES:
+                if MAX_COMPLEXES and cur.fetchone()[0] >= MAX_COMPLEXES:
                     return jsonify({
                         "error":   "limit_reached",
                         "limit":   MAX_COMPLEXES,

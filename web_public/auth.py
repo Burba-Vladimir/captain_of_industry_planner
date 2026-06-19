@@ -172,6 +172,23 @@ def _upsert_user(provider: str, provider_user_id: str,
     return user_id
 
 
+def _finalize_oauth_login(user_id: int):
+    """Завершает вход через OAuth: переносит данные гостя (если текущая сессия
+    была гостевой) на реальный аккаунт и выставляет сессию. Возвращает redirect
+    на главную (с удалением guest-cookie при мёрдже). Зеркало логики email_verify.
+    """
+    guest_user = g.get("user")
+    was_guest  = bool(guest_user and guest_user.get("is_guest"))
+    if was_guest:
+        _merge_guest_to_user(guest_user["id"], user_id)
+        session.pop("_seen_updated", None)
+    session["user_id"] = user_id
+    resp = make_response(redirect(url_for("index")))
+    if was_guest:
+        resp.delete_cookie("coi_guest")
+    return resp
+
+
 # ─────────────────────────────────────────────────────────────────
 # Google OAuth
 # ─────────────────────────────────────────────────────────────────
@@ -193,8 +210,7 @@ def google_callback():
         avatar_url=userinfo.get("picture"),
         email=userinfo.get("email"),
     )
-    session["user_id"] = user_id
-    return redirect(url_for("index"))
+    return _finalize_oauth_login(user_id)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -249,8 +265,7 @@ def steam_callback():
         avatar_url=profile.get("avatarmedium"),
         email=None,  # Steam не предоставляет email
     )
-    session["user_id"] = user_id
-    return redirect(url_for("index"))
+    return _finalize_oauth_login(user_id)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -360,9 +375,9 @@ def _send_email(to: str, code: str) -> None:
 
 def _merge_guest_to_user(guest_id: int, real_id: int) -> None:
     """
-    Переносит данные гостя (комплексы, скрытые рецепты) на реальный аккаунт.
-    Комплексы с конфликтующими именами переименовываются (суффикс " (imported)").
-    Гостевой пользователь удаляется после переноса.
+    Переносит данные гостя (комплексы, скрытые рецепты, скрытые комплексы) на
+    реальный аккаунт. Комплексы с конфликтующими именами переименовываются
+    (суффикс " (imported)"). Гостевой пользователь удаляется после переноса.
     """
     if guest_id == real_id:
         return
@@ -386,6 +401,15 @@ def _merge_guest_to_user(guest_id: int, real_id: int) -> None:
                 FROM   user_recipe_prefs
                 WHERE  user_id = %s AND hidden = TRUE
                 ON CONFLICT (user_id, recipe_id) DO NOTHING
+            """, (real_id, guest_id))
+            # Скопировать скрытые комплексы (игнорировать дубликаты).
+            # Делаем ДО удаления гостя — иначе ON DELETE CASCADE снесёт эти строки.
+            cur.execute("""
+                INSERT INTO user_complex_prefs (user_id, complex_id, hidden)
+                SELECT %s, complex_id, hidden
+                FROM   user_complex_prefs
+                WHERE  user_id = %s AND hidden = TRUE
+                ON CONFLICT (user_id, complex_id) DO NOTHING
             """, (real_id, guest_id))
             # Удалить гостя (каскад удалит оставшиеся данные)
             cur.execute("DELETE FROM users WHERE id = %s AND is_guest = TRUE", (guest_id,))

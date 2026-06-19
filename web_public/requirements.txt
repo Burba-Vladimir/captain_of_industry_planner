@@ -6,3 +6,4 @@ flask-babel>=4.0      # i18n / l10n
 flask-limiter>=3.5    # Rate limiting
 requests>=2.31        # HTTP client (OAuth callbacks)
 python-dotenv>=1.0    # .env support for local dev
+gunicorn>=21.2        # WSGI server (production)

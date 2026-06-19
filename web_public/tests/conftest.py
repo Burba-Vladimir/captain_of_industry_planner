@@ -92,6 +92,10 @@ def cleanup_guests(db_conn):
             DELETE FROM user_recipe_prefs
             WHERE user_id IN (SELECT id FROM users WHERE is_guest = TRUE AND id > %s)
         """, (max_id_before,))
+        cur.execute("""
+            DELETE FROM user_complex_prefs
+            WHERE user_id IN (SELECT id FROM users WHERE is_guest = TRUE AND id > %s)
+        """, (max_id_before,))
         cur.execute(
             "DELETE FROM users WHERE is_guest = TRUE AND id > %s",
             (max_id_before,),
