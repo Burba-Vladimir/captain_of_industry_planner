@@ -50,3 +50,27 @@ jobs:
       - name: Run tests
         working-directory: web_public
         run: python -m pytest tests/ -v --tb=short --no-header
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -e
+            git config --global --add safe.directory /var/www/coi-planner
+            cd /var/www/coi-planner
+            git fetch --all --prune
+            git reset --hard origin/main
+            cd web_public
+            .venv/bin/pip install -r requirements.txt
+            chown -R www-data:www-data /var/www/coi-planner
+            systemctl restart coi-planner
+            sleep 2
+            systemctl is-active coi-planner
