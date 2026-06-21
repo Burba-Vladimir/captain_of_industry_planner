@@ -1215,6 +1215,8 @@ function complexEditor(complexId, readOnlyMode) {
           count:         1,
           pos_x:         800, pos_y: 300,
           label:         n.machine_name||n.name||'?',
+          node_ref_slug: n.node_type === 'complex' ? (n.slug || null) : null,
+          owner_id:      n.node_type === 'complex' ? (n.owner_id || null) : null,
           inputs:        this.normPickerItems(n.inputs),
           outputs:       this.normPickerItems(n.outputs),
           maintenance:   this.normPickerItems(n.maintenance),
