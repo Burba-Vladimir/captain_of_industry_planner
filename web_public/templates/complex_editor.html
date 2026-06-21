@@ -2839,7 +2839,7 @@ function complexEditor(complexId, readOnlyMode) {
       return Number.isInteger(n)?String(n):n.toFixed(n<10?2:1);
     },
 
-    iconOf(name) { return '/static/icons/'+(name||'').replaceAll(' ','_')+'.png'; },
+    iconOf(name) { return '/static/icons/'+encodeURIComponent((name||'').replaceAll(' ','_'))+'.png'; },
 
     displayItem(item) {
       for (const n of this.nodes) {

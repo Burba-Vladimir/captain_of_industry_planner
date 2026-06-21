@@ -1782,7 +1782,7 @@ function app() {
     },
 
     /* ── Utils ──────────────────────────────────────────────────── */
-    iconOf(name) { return '/static/icons/' + (name||'').replaceAll(' ','_') + '.png'; },
+    iconOf(name) { return '/static/icons/' + encodeURIComponent((name||'').replaceAll(' ','_')) + '.png'; },
   };
 }
 </script>
