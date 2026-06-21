@@ -57,7 +57,8 @@ class TestAbout:
         r = client.get("/about")
         assert r.status_code == 200
         assert b"CoI Planner" in r.data
-        assert b"Ko-fi" in r.data
+        assert b"Boosty" in r.data
+        assert b"lava.top" in r.data
 
     def test_about_ru(self, client):
         r = client.get("/about?lang=ru")
