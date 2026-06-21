@@ -36,6 +36,14 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
   <style>
     [x-cloak]  { display: none !important; }
+    /* Периодический «блик» на одной случайной кнопке создания комплекса */
+    .new-cx-btn.cx-glint::after {
+      content:""; position:absolute; top:0; bottom:0; left:-70%; width:55%;
+      background:linear-gradient(100deg, transparent, rgba(255,255,255,.85), transparent);
+      transform:skewX(-20deg); pointer-events:none;
+      animation:cxglint .8s ease-in-out;
+    }
+    @keyframes cxglint { from { left:-70%; } to { left:150%; } }
     .chip      { display:inline-flex; align-items:center; padding: 1px 7px;
                  border-radius: 999px; font-size: .72rem; font-weight: 500; white-space:nowrap; }
     tbody tr   { transition: background .1s; }
@@ -193,9 +201,21 @@
     </button>
     {% endif %}
 
+    <!-- Donate — noticeable but soft -->
+    <button @click="donateOpen = true"
+            title="{% if lang == 'ru' %}Скинуться на сервер{% else %}Chip in for hosting{% endif %}"
+            class="shrink-0 ml-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium
+                   text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60
+                   hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+      </svg>
+      <span class="hidden sm:inline">{% if lang == 'ru' %}Поддержать{% else %}Chip in{% endif %}</span>
+    </button>
+
     <!-- About link — far right, separated from user block -->
     <a href="/about"
-       class="shrink-0 ml-3 px-3 py-1.5 text-sm text-slate-500 dark:text-slate-400
+       class="shrink-0 px-3 py-1.5 text-sm text-slate-500 dark:text-slate-400
               hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
       {{ t('nav.about') }}
     </a>
@@ -413,27 +433,25 @@
                 <!-- Создать комплекс на основе рецепта -->
                 <a x-show="node.node_type==='recipe'"
                    :href="'/complex/new?from_type=recipe&from_id=' + node.node_id + '&back=' + encodeURIComponent(location.pathname+location.search)"
-                   class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
+                   class="new-cx-btn relative overflow-hidden inline-flex items-center justify-center w-6 h-6 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800/60 hover:scale-110 transition-all"
                    :title="'{{ t('browse.new_from_recipe') }}'">
                   <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
-                    <circle cx="3" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/>
-                    <circle cx="17" cy="4" r="2.5" stroke="currentColor" stroke-width="1.5"/>
-                    <circle cx="17" cy="16" r="2.5" stroke="currentColor" stroke-width="1.5"/>
-                    <line x1="5.3" y1="9.0" x2="14.7" y2="4.9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-                    <line x1="5.3" y1="11.0" x2="14.7" y2="15.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                    <rect x="7" y="1.5" width="6" height="5" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                    <rect x="1.5" y="13" width="6" height="5" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                    <rect x="12.5" y="13" width="6" height="5" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M10 6.5 V9.5 M4.5 13 V10.5 H15.5 V13 M10 9.5 V10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
                 </a>
                 <!-- Создать новый комплекс с этим в качестве основы -->
                 <a x-show="node.node_type==='complex'"
                    :href="'/complex/new?from_type=complex&from_id=' + node.node_id + '&back=' + encodeURIComponent(location.pathname+location.search)"
-                   class="inline-flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100 hover:scale-110 transition-all text-slate-600 dark:text-slate-400"
+                   class="new-cx-btn relative overflow-hidden inline-flex items-center justify-center w-6 h-6 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800/60 hover:scale-110 transition-all"
                    :title="'{{ t('browse.new_from_complex') }}'">
                   <svg viewBox="0 0 20 20" fill="none" class="w-5 h-5">
-                    <circle cx="3" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/>
-                    <circle cx="17" cy="4" r="2.5" stroke="currentColor" stroke-width="1.5"/>
-                    <circle cx="17" cy="16" r="2.5" stroke="currentColor" stroke-width="1.5"/>
-                    <line x1="5.3" y1="9.0" x2="14.7" y2="4.9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-                    <line x1="5.3" y1="11.0" x2="14.7" y2="15.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                    <rect x="7" y="1.5" width="6" height="5" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                    <rect x="1.5" y="13" width="6" height="5" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                    <rect x="12.5" y="13" width="6" height="5" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M10 6.5 V9.5 M4.5 13 V10.5 H15.5 V13 M10 9.5 V10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
                 </a>
                 <!-- Редактировать комплекс (только свои) -->
@@ -1162,6 +1180,41 @@
 </div>
 
 
+<!-- ═══════════ DONATE MODAL ═══════════ -->
+<div x-show="donateOpen" x-cloak x-transition.opacity
+     @click="donateOpen = false"
+     class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+  <div @click.stop
+       class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6 max-w-sm w-full relative">
+    <button @click="donateOpen = false"
+            class="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-lg">✕</button>
+    <h2 class="font-bold text-lg text-slate-800 dark:text-slate-100 mb-1">
+      {% if lang == 'ru' %}Поддержать проект{% else %}Support the project{% endif %}
+    </h2>
+    <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">
+      {% if lang == 'ru' %}CoI Planner бесплатный и таким останется. Если он полезен — можно скинуться на оплату сервера. Спасибо!{% else %}CoI Planner is free and always will be. If it's useful, you can chip in toward the server costs. Thank you!{% endif %}
+    </p>
+    <div class="space-y-3">
+      <a href="{{ donate_lava_url }}" target="_blank" rel="noopener"
+         class="flex items-center gap-2.5 px-4 py-3 rounded-xl font-medium text-sm
+                bg-[#FF7A1A] hover:bg-[#e86c12] text-white transition-colors justify-center">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 12.9l-2.13 2.09c-.56.56-.87 1.29-.87 2.07C9 18.68 10.35 20 12 20s3-1.32 3-2.94c0-.78-.31-1.52-.87-2.07L12 12.9zM16 6l-.44.55c-.21.26-.65.24-.83-.04C13.39 4.59 11 3.2 11 1c0 0-7 4-7 11 0 4.42 3.58 8 8 8s8-3.58 8-8c0-2.5-1.5-4.5-4-6z"/>
+        </svg>
+        lava.top
+      </a>
+      <a href="{{ donate_boosty_url }}" target="_blank" rel="noopener"
+         class="flex items-center gap-2.5 px-4 py-3 rounded-xl font-medium text-sm
+                bg-[#F15A22] hover:bg-[#d94e1b] text-white transition-colors justify-center">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+        Boosty
+      </a>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════════ AUTH MODAL ═══════════ -->
 <div x-show="showAuth"
      x-transition:enter="transition ease-out duration-150"
@@ -1301,6 +1354,9 @@ function app() {
 
     /* ── Delete confirm ─────────────────────────────────────────── */
     confirmDelete: null,  // { ids: [...], names: [...] } | null
+
+    /* ── Donate modal ────────────────────────────────────────────── */
+    donateOpen:  false,
 
     /* ── Auth modal ──────────────────────────────────────────────── */
     showAuth:    false,
@@ -1759,5 +1815,37 @@ function app() {
     </button>
   </div>
 </div>
+
+<script>
+  // «Волна» бликов сверху вниз по кнопкам создания комплекса:
+  // блик стартует на первой кнопке, через STAGGER — на второй и т.д.
+  // При длительности блика GLINT и шаге STAGGER одновременно «в движении»
+  // примерно GLINT/STAGGER кнопок (~4). После прохода — пауза и повтор.
+  (function () {
+    var GLINT   = 850;   // длительность одного блика (CSS-анимация .8s + буфер)
+    var STAGGER = 200;   // задержка между соседними кнопками → ~4 одновременно
+    var PAUSE   = 3500;  // пауза после полного прохода волны
+
+    function visibleButtons() {
+      return Array.prototype.filter.call(
+        document.querySelectorAll('.new-cx-btn'),
+        function (b) { return b.offsetParent !== null; }   // только отрендеренные
+      );
+    }
+    function wave() {
+      var btns = visibleButtons();
+      if (!btns.length) { setTimeout(wave, PAUSE); return; }
+      btns.forEach(function (b, i) {
+        setTimeout(function () {
+          b.classList.add('cx-glint');
+          setTimeout(function () { b.classList.remove('cx-glint'); }, GLINT);
+        }, i * STAGGER);
+      });
+      // следующая волна — после прохода всех кнопок + пауза
+      setTimeout(wave, btns.length * STAGGER + GLINT + PAUSE);
+    }
+    wave();
+  })();
+</script>
 </body>
 </html>

@@ -423,10 +423,14 @@ app.jinja_env.globals["current_user"] = lambda: g.get("user")
 GOOGLE_ENABLED = bool(os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET"))
 STEAM_ENABLED  = bool(os.environ.get("STEAM_API_KEY"))
 
+# Ссылки на донаты (переопределяются через .env при необходимости)
+DONATE_LAVA_URL   = os.environ.get("DONATE_LAVA_URL",   "https://app.lava.top/products/4f9189e1-9e48-4d01-964d-5e5765adacb7")
+DONATE_BOOSTY_URL = os.environ.get("DONATE_BOOSTY_URL", "https://boosty.to/burba_vladimir/donate")
+
 
 @app.context_processor
 def inject_template_globals():
-    """Вставить lang, theme, i18n, user и флаги OAuth в каждый шаблон."""
+    """Вставить lang, theme, i18n, user, флаги OAuth и ссылки донатов в каждый шаблон."""
     lang  = getattr(g, "lang",  "en")
     theme = getattr(g, "theme", "light")
     i18n  = _translations.get(lang) or _translations.get("en", {})
@@ -434,6 +438,7 @@ def inject_template_globals():
     return {
         "lang": lang, "theme": theme, "i18n": i18n, "user": user,
         "google_enabled": GOOGLE_ENABLED, "steam_enabled": STEAM_ENABLED,
+        "donate_lava_url": DONATE_LAVA_URL, "donate_boosty_url": DONATE_BOOSTY_URL,
     }
 
 

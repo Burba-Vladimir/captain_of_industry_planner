@@ -183,18 +183,18 @@
 
       <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
 
-        <!-- Ko-fi -->
-        <a href="#"  {# TODO: вставить ссылку Ko-fi #}
+        <!-- lava.top -->
+        <a href="{{ donate_lava_url }}" target="_blank" rel="noopener"
            class="flex items-center gap-2.5 px-5 py-3 rounded-xl font-medium text-sm
-                  bg-[#FF5E5B] hover:bg-[#e54e4b] text-white transition-colors w-full sm:w-auto justify-center">
+                  bg-[#FF7A1A] hover:bg-[#e86c12] text-white transition-colors w-full sm:w-auto justify-center">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 9.298-.022 11.205c.068 2.268 1.949 2.885 3.745 2.885H5.72c1.044 0 1.049-1.064 1.049-1.064s.049-5.064-.001-6.335c-.052-1.27 1.048-1.394 1.048-1.394s1.048-.014 1.048 1.394c0 1.408.048 6.335.048 6.335S8.918 19.25 9.962 19.25H18.2c2.268 0 3.745-.617 3.745-2.885.06-1.907-.022-7.319-.064-7.417zm-6.675 4.273c-.754.692-1.748.923-2.698.923H12.1v2.626h-1.407v-7.29h3.815c.95 0 1.944.231 2.698.923.767.702.906 1.878.437 2.818-.107.216-.261.415-.437.6zm-.957-3.136c-.398-.356-.922-.549-1.74-.549H12.1v2.938h2.41c.818 0 1.342-.193 1.74-.549.398-.356.398-.884 0-1.84z"/>
+            <path d="M12 12.9l-2.13 2.09c-.56.56-.87 1.29-.87 2.07C9 18.68 10.35 20 12 20s3-1.32 3-2.94c0-.78-.31-1.52-.87-2.07L12 12.9zM16 6l-.44.55c-.21.26-.65.24-.83-.04C13.39 4.59 11 3.2 11 1c0 0-7 4-7 11 0 4.42 3.58 8 8 8s8-3.58 8-8c0-2.5-1.5-4.5-4-6z"/>
           </svg>
-          Ko-fi
+          lava.top
         </a>
 
         <!-- Boosty -->
-        <a href="#"  {# TODO: вставить ссылку Boosty #}
+        <a href="{{ donate_boosty_url }}" target="_blank" rel="noopener"
            class="flex items-center gap-2.5 px-5 py-3 rounded-xl font-medium text-sm
                   bg-[#F15A22] hover:bg-[#d94e1b] text-white transition-colors w-full sm:w-auto justify-center">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
@@ -203,25 +203,15 @@
           Boosty
         </a>
 
-        <!-- Patreon -->
-        <a href="#"  {# TODO: вставить ссылку Patreon #}
-           class="flex items-center gap-2.5 px-5 py-3 rounded-xl font-medium text-sm
-                  bg-[#FF424D] hover:bg-[#e03840] text-white transition-colors w-full sm:w-auto justify-center">
-          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M14.82 2.41c3.96 0 7.18 3.24 7.18 7.21 0 3.96-3.22 7.18-7.18 7.18-3.97 0-7.21-3.22-7.21-7.18 0-3.97 3.24-7.21 7.21-7.21zM2 21.6h3.5V2.41H2V21.6z"/>
-          </svg>
-          Patreon
-        </a>
-
       </div>
 
       {% if lang == 'ru' %}
       <p class="text-xs text-slate-500 mt-6">
-        Boosty работает с картами РФ · Ko-fi и Patreon — для зарубежных читателей
+        Любая поддержка помогает оплачивать сервер и развивать проект. Спасибо!
       </p>
       {% else %}
       <p class="text-xs text-slate-500 mt-6">
-        Ko-fi &amp; Patreon accept international cards · Boosty is available for Russian supporters
+        Any support helps cover the server and keep the project growing. Thank you!
       </p>
       {% endif %}
 
