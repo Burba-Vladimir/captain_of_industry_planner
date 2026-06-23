@@ -113,17 +113,24 @@ def load_guest_by_cookie(cookie_val: str) -> dict | None:
     return _row_to_user(row) if row else None
 
 
-def create_guest_user() -> tuple[dict, str]:
-    """Создаёт нового гостевого пользователя. Возвращает (user_dict, cookie_value)."""
+def create_guest_user(utm_source: str | None = None,
+                      referrer: str | None = None) -> tuple[dict, str]:
+    """Создаёт нового гостевого пользователя. Возвращает (user_dict, cookie_value).
+
+    utm_source/referrer фиксируют источник первого визита (для аналитики трафика).
+    """
     cookie_val = str(uuid.uuid4())
+    utm_source = (utm_source or None) and utm_source[:64]
+    referrer   = (referrer   or None) and referrer[:255]
     with get_db() as con:
         with con.cursor() as cur:
             cur.execute("""
                 INSERT INTO users
-                    (provider, provider_user_id, display_name, is_guest, guest_cookie)
-                VALUES ('guest', %s, 'Guest', TRUE, %s)
+                    (provider, provider_user_id, display_name, is_guest, guest_cookie,
+                     utm_source, referrer)
+                VALUES ('guest', %s, 'Guest', TRUE, %s, %s, %s)
                 RETURNING id
-            """, (cookie_val, cookie_val))
+            """, (cookie_val, cookie_val, utm_source, referrer))
             user_id = cur.fetchone()[0]
         con.commit()
     return {

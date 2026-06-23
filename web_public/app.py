@@ -341,8 +341,9 @@ def before_request():
         if cookie_val:
             g.user = load_guest_by_cookie(cookie_val)
         if not g.get("user"):
-            # Новый посетитель: создаём гостя и запоминаем cookie для after_request
-            g.user, g._new_guest_cookie = create_guest_user()
+            # Новый посетитель: создаём гостя (с источником перехода) и запоминаем cookie
+            g.user, g._new_guest_cookie = create_guest_user(
+                request.args.get("utm_source"), request.referrer)
 
     # ?lang= query param — наивысший приоритет (для кнопки смены языка)
     lang_qp = request.args.get("lang")
@@ -2473,6 +2474,52 @@ def _run_cleanup(sql_count: str, sql_delete: str, params: tuple,
             deleted_ids = [r[0] for r in cur.fetchall()]
         con.commit()
     return deleted_ids
+
+
+@app.cli.command("stats")
+def stats() -> None:
+    """Сводка по трафику: посетители, источники, регистрации, комплексы."""
+    with get_db() as con:
+        with con.cursor() as cur:
+            def one(sql: str) -> int:
+                cur.execute(sql)
+                return cur.fetchone()[0]
+
+            visitors  = one("SELECT count(*) FROM users WHERE is_guest")
+            signups   = one("SELECT count(*) FROM users WHERE NOT is_guest")
+            new_24h   = one("SELECT count(*) FROM users WHERE created_at>now()-interval '24 hours'")
+            new_7d    = one("SELECT count(*) FROM users WHERE created_at>now()-interval '7 days'")
+            new_30d   = one("SELECT count(*) FROM users WHERE created_at>now()-interval '30 days'")
+            active_7d = one("SELECT count(*) FROM users WHERE last_seen_at>now()-interval '7 days'")
+            cx_total  = one("SELECT count(*) FROM complexes")
+            cx_pub    = one("SELECT count(*) FROM complexes WHERE visibility='public'")
+            cx_7d     = one("SELECT count(*) FROM complexes WHERE created_at>now()-interval '7 days'")
+
+            click.echo("── Трафик ──")
+            click.echo(f"Посетителей всего (гостей): {visitors}")
+            click.echo(f"Зарегистрировано:           {signups}")
+            click.echo(f"Новых посетителей  24ч / 7д / 30д: {new_24h} / {new_7d} / {new_30d}")
+            click.echo(f"Активны за 7д:              {active_7d}")
+            click.echo(f"Комплексов всего / публичных / за 7д: {cx_total} / {cx_pub} / {cx_7d}")
+
+            click.echo("\n── Новые посетители по дням (14д) ──")
+            cur.execute("""SELECT date_trunc('day', created_at)::date d, count(*)
+                           FROM users WHERE created_at > now()-interval '14 days'
+                           GROUP BY d ORDER BY d""")
+            for d, n in cur.fetchall():
+                click.echo(f"  {d}: {n}")
+
+            click.echo("\n── По источнику перехода (utm_source) ──")
+            cur.execute("""SELECT COALESCE(utm_source, '(без метки / прямой)') s, count(*)
+                           FROM users GROUP BY s ORDER BY count(*) DESC LIMIT 20""")
+            for s, n in cur.fetchall():
+                click.echo(f"  {s}: {n}")
+
+            click.echo("\n── Регистрации по провайдеру ──")
+            cur.execute("""SELECT provider::text, count(*) FROM users WHERE NOT is_guest
+                           GROUP BY provider ORDER BY count(*) DESC""")
+            for p, n in cur.fetchall():
+                click.echo(f"  {p}: {n}")
 
 
 @app.cli.command("cleanup-guests")

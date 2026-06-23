@@ -384,6 +384,8 @@ CREATE TABLE IF NOT EXISTS users (
     is_premium       BOOLEAN       NOT NULL DEFAULT FALSE,
     is_guest         BOOLEAN       NOT NULL DEFAULT FALSE,
     guest_cookie     UUID,
+    utm_source       TEXT,
+    referrer         TEXT,
     created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
     last_seen_at     TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
     UNIQUE (provider, provider_user_id)
