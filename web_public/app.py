@@ -495,7 +495,9 @@ def api_settings():
     if not g.get("user"):
         return jsonify({"error": "login_required"}), 401
     data = request.get_json(silent=True) or {}
-    allowed = {"ui_language", "ui_theme", "show_public_complexes"}
+    # population_prefs — выбранные рецепты, уровни зданий и население
+    # на странице нужд поселения. Хранится JSON-строкой.
+    allowed = {"ui_language", "ui_theme", "show_public_complexes", "population_prefs"}
     for key, value in data.items():
         if key in allowed:
             _set_user_setting(g.user["id"], key, str(value))
@@ -887,6 +889,11 @@ def about():
     return render_template("about.html")
 
 
+@app.route("/population")
+def population():
+    return render_template("population.html", user=g.get("user"))
+
+
 @app.route("/complex/new")
 def complex_new():
     back = request.args.get('back', '')
@@ -1203,6 +1210,618 @@ def api_node_detail(node_type: str, node_id: int):
         return jsonify(row)
     except Exception as e:
         return _err500(e)
+
+
+# ─────────────────────────────────────────────────────────────────
+# API: расчёт нужд поселения
+# ─────────────────────────────────────────────────────────────────
+
+@app.route("/api/population/data")
+def api_population_data():
+    """Потребности населения вместе с рецептами-кандидатами.
+
+    Отдаём всё одним запросом: страница пересчитывается в браузере при каждом
+    изменении параметров, ходить на сервер за этим не нужно.
+
+    Кандидаты подбираются по типу потребности:
+      need_type=0 (потребление) — рецепты, которые предмет производят;
+      need_type=1 (отход)       — рецепты, которые его потребляют;
+      need_type=2 (нагрузка)    — тоже производители: электроэнергия и
+                                  вычисления в игре обычные предметы.
+    """
+    trans = getattr(g, "content_trans", {})
+
+    def disp(name):
+        return trans.get(name, name) if name else name
+
+    HIDDEN_GROUPS: tuple[str, ...] = ()
+
+    # Компоненты медикаментов делаются только для них, поэтому цепочку
+    # разворачиваем: сами уровни лекарств — рекурсивно, их составляющие —
+    # на один шаг. Глубже не идём, дальше уже общепромышленное сырьё.
+    MEDICINE_ITEMS = {"Medical Supplies", "Medical Supplies II", "Medical Supplies III"}
+
+    # Охлаждённая вода делается единственным рецептом и только для ЦОД,
+    # поэтому её производство тоже показываем цепочкой.
+    DEDICATED_INPUTS = {"Computing": ["Chilled Water"]}
+
+    # Пищевой подграф: обход от потребностей питания вниз, пока предмет
+    # делается на пищевом здании. Мак и сахар добавлены корнями явно —
+    # они нужны медикаментам (морфий и антибиотики), но сами растут и
+    # обрабатываются в пищевой цепочке.
+    FOOD_BUILDINGS = ("Farm", "Irrigated Farm", "Greenhouse", "Greenhouse II",
+                      "Chicken Farm", "Food Processor", "Mill", "Baking Unit",
+                      "Mixer", "Mixer II")
+    CHAIN_EXTRA_ROOTS = ("Poppy", "Sugar", "Food Pack")
+    # Пайки делают на сборочной линии, а не на пищевом здании, но по сути
+    # это такой же продукт цепочки: он потребляет готовую еду.
+    CHAIN_ANY_BUILDING = ("Food Pack",)
+    # Вода и удобрения — общие ресурсы, вглубь не разворачиваются.
+    def chain_stop(name):
+        return name == "Water" or name.startswith("Fertilizer")
+
+    # Воду в игре «производят» многие рецепты — от градирен до крекинга,
+    # но там она побочный выход. Для покрытия потребности поселения годятся
+    # только те здания, которые её именно добывают.
+    WATER_PRODUCERS = ("Groundwater Pump", "Rainwater Harvester", "Thermal Desalinator")
+
+    # Фермы выбираются одним переключателем на всё поселение, а не в каждой
+    # строке: иначе комбинаторика раскладки культур по фермам станет
+    # неуправляемой. Плантация работает без удобрений, остальные три — с ними.
+    FARM_BUILDINGS = ("Farm", "Irrigated Farm", "Greenhouse", "Greenhouse II")
+
+    # Куда девать то, что план вырастил, но не израсходовал. Порядок важен:
+    # сначала газ, потом компост, и только если больше некуда — горелка.
+    # Ферментёр принимает восемь культур из девяти, рапс — только в горелку.
+    DISPOSAL_BUILDINGS = ("Anaerobic Digester", "Mixer", "Mixer II",
+                          "Shredder", "Food Processor", "Burner (Solid)")
+    # «process» — не утилизация, а передел: лишние тушки идут в потроха,
+    # а те уже в газ. Поэтому он первым в очереди способов.
+    DISPOSAL_ORDER = {"process": 0, "gas": 1, "biomass": 2, "compost": 3, "burn": 4}
+
+    def disposal_kind(outputs):
+        """Что это за переработка — по тому, что выходит из рецепта."""
+        names = {o["item"] for o in outputs}
+        if "Fuel Gas" in names:
+            return "gas"
+        if "Compost" in names:
+            return "compost"
+        # Саженцы девать некуда, кроме шредера, а биомассу из него уже
+        # примет смеситель — переработка в два шага.
+        if names == {"Biomass"}:
+            return "biomass"
+        if names == {"Meat Trimmings"}:
+            return "process"
+        if names and names <= {"Air Pollution"}:
+            return "burn"
+        return None
+
+    # Выбор по умолчанию: (предмет, здание, обязательный вход или None).
+    PREFERRED = [
+        ("Waste Water",  "Wastewater Treatment",   "Filter Media"),
+        ("Waste",        "Incineration Plant",     "Hydrogen"),
+        ("Electricity",  "Power Generator (Large)", None),
+        ("Computing",    "Data Center",             None),
+    ]
+
+    # Рецепты младших уровней помечены deprecated («вытеснено старшим
+    # уровнем»), а не «убрано из игры»: 198 из 206 таких — ровно варианты
+    # уровней. Пропускаем их, если у здания есть старшие уровни.
+    TIER_CTE = """
+        WITH fam AS (
+            SELECT id, name, regexp_replace(name, ' (I{1,3}|IV|V|VI)$', '') AS base
+            FROM buildings
+        ),
+        multi AS (SELECT base FROM fam GROUP BY base HAVING count(*) > 1)
+    """
+
+    try:
+        with get_db() as con:
+            with dict_cursor(con) as cur:
+                cur.execute("""
+                    SELECT n.id, n.item, n.label, n.need_type, n.qty_per_10k, n.unit,
+                           n.group_key, n.choice_group, n.is_default, n.food_group,
+                           n.sort_order,
+                           -- Сколько всего продуктов в группе питания: норма в
+                           -- qty_per_10k задана для полного состава, и из этого
+                           -- числа выводится «полная» норма продукта.
+                           (SELECT count(*) FROM population_needs m
+                             WHERE m.food_group = n.food_group) AS group_size
+                    FROM population_needs n
+                    WHERE NOT (n.group_key = ANY(%s))
+                    ORDER BY n.sort_order
+                """, (list(HIDDEN_GROUPS),))
+                needs = [dict(r) for r in cur.fetchall()]
+
+                # ── Кандидаты для самих потребностей ─────────────────
+                cur.execute(TIER_CTE + """
+                    SELECT n.id           AS need_id,
+                           r.id           AS recipe_id,
+                           r.cycle_time_s,
+                           b.id           AS building_id,
+                           b.name         AS building,
+                           f.base         AS family,
+                           b.workers,
+                           b.electricity_kw,
+                           b.computing_tf,
+                           rf.qty_per_min AS rate
+                    FROM population_needs n
+                    JOIN items i           ON i.name = n.item
+                    JOIN resource_flows rf ON rf.item_id = i.id
+                                          AND rf.parent_type = 0
+                                          AND rf.direction = CASE n.need_type
+                                                                  WHEN 1 THEN 0
+                                                                  ELSE 1
+                                                             END
+                    JOIN recipes r         ON r.id = rf.recipe_id
+                    LEFT JOIN buildings b  ON b.id = r.machine_id
+                    LEFT JOIN fam f        ON f.id = b.id
+                    WHERE NOT (n.group_key = ANY(%s))
+                      AND (NOT r.deprecated OR f.base IN (SELECT base FROM multi))
+                    ORDER BY n.id, rf.qty_per_min DESC
+                """, (list(HIDDEN_GROUPS),))
+                cand_rows = [dict(r) for r in cur.fetchall()]
+
+                # ── Производители произвольных предметов (для дерева) ─
+                cur.execute(TIER_CTE + """
+                    SELECT i.name         AS produces,
+                           r.id           AS recipe_id,
+                           r.cycle_time_s,
+                           b.id           AS building_id,
+                           b.name         AS building,
+                           f.base         AS family,
+                           b.workers,
+                           b.electricity_kw,
+                           b.computing_tf,
+                           rf.qty_per_min AS rate
+                    FROM resource_flows rf
+                    JOIN items i          ON i.id = rf.item_id
+                    JOIN recipes r        ON r.id = rf.recipe_id
+                    LEFT JOIN buildings b ON b.id = r.machine_id
+                    LEFT JOIN fam f       ON f.id = b.id
+                    WHERE rf.parent_type = 0 AND rf.direction = 1
+                      AND (NOT r.deprecated OR f.base IN (SELECT base FROM multi))
+                    ORDER BY i.name, rf.qty_per_min DESC
+                """)
+                producer_rows: dict[str, list] = {}
+                for r in cur.fetchall():
+                    producer_rows.setdefault(r["produces"], []).append(dict(r))
+
+                # ── Переработка: кто съедает предмет насовсем ────────
+                cur.execute(TIER_CTE + """
+                    SELECT i.name         AS consumes,
+                           r.id           AS recipe_id,
+                           r.cycle_time_s,
+                           b.id           AS building_id,
+                           b.name         AS building,
+                           f.base         AS family,
+                           b.workers,
+                           b.electricity_kw,
+                           b.computing_tf,
+                           rf.qty_per_min AS rate
+                    FROM resource_flows rf
+                    JOIN items i          ON i.id = rf.item_id
+                    JOIN recipes r        ON r.id = rf.recipe_id
+                    JOIN buildings b      ON b.id = r.machine_id
+                    LEFT JOIN fam f       ON f.id = b.id
+                    WHERE rf.parent_type = 0 AND rf.direction = 0
+                      AND b.name = ANY(%s)
+                      AND (NOT r.deprecated OR f.base IN (SELECT base FROM multi))
+                    ORDER BY i.name, rf.qty_per_min DESC
+                """, (list(DISPOSAL_BUILDINGS),))
+                disposal_rows = [dict(r) for r in cur.fetchall()]
+
+                # ── Составы рецептов ────────────────────────────────
+                cur.execute("""
+                    SELECT rf.recipe_id, rf.direction, i.name AS item,
+                           rf.qty_per_min, rf.sort_order
+                    FROM resource_flows rf
+                    JOIN items i ON i.id = rf.item_id
+                    WHERE rf.parent_type = 0
+                    ORDER BY rf.recipe_id, rf.direction, rf.sort_order
+                """)
+                flows_by_recipe: dict[int, dict[str, list]] = {}
+                for f in cur.fetchall():
+                    slot = flows_by_recipe.setdefault(
+                        f["recipe_id"], {"inputs": [], "outputs": []}
+                    )
+                    key = "outputs" if f["direction"] == 1 else "inputs"
+                    slot[key].append({
+                        "item":         f["item"],
+                        "item_display": disp(f["item"]),
+                        "qty_per_min":  float(f["qty_per_min"] or 0),
+                        # У выходов нулевой sort_order стоит у основного
+                        # продукта: по нему и считается размер рецепта,
+                        # остальные выходы дают лишь зачёт.
+                        "primary":      f["direction"] == 1 and f["sort_order"] == 0,
+                    })
+
+                # ── Обслуживание (запчасти) по зданиям ──────────────
+                cur.execute("SELECT building_id, item, rate_per_min FROM building_maintenance")
+                mnt_by_building: dict[int, list] = {}
+                for m in cur.fetchall():
+                    mnt_by_building.setdefault(m["building_id"], []).append({
+                        "item":         m["item"],
+                        "item_display": disp(m["item"]),
+                        "rate_per_min": float(m["rate_per_min"] or 0),
+                    })
+
+                # ── Семейства зданий с уровнями ─────────────────────
+                cur.execute("""
+                    SELECT regexp_replace(name, ' (I{1,3}|IV|V|VI)$', '') AS base,
+                           id, name
+                    FROM buildings
+                    ORDER BY 1, 3
+                """)
+                fam_members: dict[str, list] = {}
+                for b in cur.fetchall():
+                    fam_members.setdefault(b["base"], []).append(b["name"])
+
+                # ── Выращиваемые предметы: всё, что выходит с ферм ──
+                cur.execute("""
+                    SELECT DISTINCT i.name
+                    FROM resource_flows rf
+                    JOIN items i     ON i.id = rf.item_id
+                    JOIN recipes r   ON r.id = rf.recipe_id AND NOT r.deprecated
+                    JOIN buildings b ON b.id = r.machine_id
+                    WHERE rf.parent_type = 0 AND rf.direction = 1
+                      AND b.name IN ('Farm', 'Irrigated Farm', 'Greenhouse',
+                                     'Greenhouse II', 'Chicken Farm')
+                """)
+                grown_items = sorted(r["name"] for r in cur.fetchall())
+    except Exception as e:
+        return _err500(e)
+
+    ROMAN = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6}
+
+    def tier_of(name):
+        if not name:
+            return 1
+        return ROMAN.get(name.rsplit(" ", 1)[-1], 1)
+
+    def make_option(row, rate, produces=None):
+        flows = flows_by_recipe.get(row["recipe_id"], {"inputs": [], "outputs": []})
+        row = dict(row, produces_item=produces or row.get("produces"))
+        return {
+            "recipe_id":        row["recipe_id"],
+            "building":         row["building"],
+            "building_display": disp(row["building"]),
+            "family":           row.get("family") or row["building"],
+            "tier":             tier_of(row["building"]),
+            "cycle_time_s":     float(row.get("cycle_time_s") or 0),
+            "workers":          float(row["workers"] or 0),
+            "electricity_kw":   float(row["electricity_kw"] or 0),
+            "computing_tf":     float(row["computing_tf"] or 0),
+            "maintenance":      mnt_by_building.get(row["building_id"], []),
+            "rate":             float(rate or 0),
+            "inputs":           flows["inputs"],
+            "outputs":          flows["outputs"],
+            # Основной ли выход у этого варианта: если нет, предмет приходит
+            # побочно и такой вариант нельзя выбрать как способ производства.
+            "is_primary":       any(o["primary"] and o["item"] == row.get("produces_item")
+                                    for o in flows["outputs"]),
+            # «Род» рецепта — по сырью, без учёта здания: смеситель I и II
+            # с кукурузой это один и тот же рецепт на разных уровнях.
+            "kind":             " + ".join(sorted(
+                                    i["item"] for i in flows["inputs"]
+                                    if i["item"] != "Water")) or "—",
+            "kind_display":     ", ".join(sorted(
+                                    (disp(i["item"]) for i in flows["inputs"]
+                                     if i["item"] != "Water"),
+                                    key=str.casefold)) or "—",
+            # Для фермовых рецептов — на какой ферме и с каким удобрением.
+            "farm":             row["building"] if row["building"] in FARM_BUILDINGS else None,
+            "fertilizer":       next((i["item"] for i in flows["inputs"]
+                                      if i["item"].startswith("Fertilizer")), None),
+        }
+
+    def sort_options(opts):
+        # Уровень в ключ не входит: между разными семействами он несравним
+        # (Diesel Generator II — второй уровень, но втрое слабее одноуровневого
+        # Power Generator (Large)). Внутри семейства старший уровень и так быстрее.
+        opts.sort(key=lambda o: (len(o["inputs"]), -o["rate"]))
+        return opts
+
+    def options_for(item):
+        return sort_options([make_option(r, r["rate"]) for r in producer_rows.get(item, [])])
+
+    def mark_preferred(item, opts):
+        """Проставляет выбор по умолчанию по правилу, а не по id рецепта:
+        id меняются при переимпорте данных, названия — нет."""
+        for want_item, want_building, want_input in PREFERRED:
+            if want_item != item:
+                continue
+            for o in opts:
+                if o["building"] != want_building:
+                    continue
+                if want_input and not any(i["item"] == want_input for i in o["inputs"]):
+                    continue
+                o["preferred"] = True
+                return
+        return
+
+    # ── Кандидаты по потребностям ────────────────────────────────────
+    options_by_need: dict[int, list] = {}
+    needs_by_id = {n["id"]: n for n in needs}
+    for c in cand_rows:
+        need = needs_by_id.get(c["need_id"])
+        if not need:
+            continue
+        opt = make_option(c, c["rate"], produces=need["item"])
+        # Отход считается переработанным, только если он действительно исчезает.
+        # Пресс превращает Waste в Waste Pressed — это перекладывание.
+        if need["need_type"] == 1 and any(
+            o["item"] != need["item"] and o["item"].startswith(need["item"])
+            for o in opt["outputs"]
+        ):
+            continue
+        options_by_need.setdefault(c["need_id"], []).append(opt)
+
+    for need_id, opts in options_by_need.items():
+        if needs_by_id[need_id]["item"] == "Water":
+            opts[:] = [o for o in opts if o["building"] in WATER_PRODUCERS]
+        sort_options(opts)
+        mark_preferred(needs_by_id[need_id]["item"], opts)
+
+    # ── Дерево производства медикаментов ────────────────────────────
+    def medicine_tree(root_item):
+        """Уровни лекарств разворачиваем рекурсивно, их составляющие — на шаг.
+
+        Глубже не идём: там начинается общепромышленное сырьё, которое
+        используется не только для медикаментов.
+
+        Порядок — обход в глубину: поддерево узла идёт сразу под ним, иначе
+        в лесенке антибиотики оказались бы не под медикаментами II, а после
+        анестетиков и морфия.
+        """
+        seen = {root_item}
+
+        def walk(cur_item):
+            out = []
+            src = producer_rows.get(cur_item)
+            if not src:
+                return out
+            for inp in flows_by_recipe.get(src[0]["recipe_id"], {}).get("inputs", []):
+                name = inp["item"]
+                if name in seen or name not in producer_rows:
+                    continue
+                seen.add(name)
+                opts = options_for(name)
+                mark_preferred(name, opts)
+                out.append({
+                    "item":         name,
+                    "item_display": disp(name),
+                    "parent":       cur_item,
+                    "is_medicine":  name in MEDICINE_ITEMS,
+                    "options":      opts,
+                })
+                if name in MEDICINE_ITEMS:
+                    out.extend(walk(name))
+            return out
+
+        return walk(root_item)
+
+    def dedicated_tree(root_item):
+        """Узлы для входов, которые делаются только ради этой цепочки."""
+        nodes = []
+        for name in DEDICATED_INPUTS.get(root_item, []):
+            if name not in producer_rows:
+                continue
+            opts = options_for(name)
+            mark_preferred(name, opts)
+            nodes.append({
+                "item":         name,
+                "item_display": disp(name),
+                "parent":       root_item,
+                "is_medicine":  False,
+                "options":      opts,
+            })
+        return nodes
+
+    result = []
+    for n in needs:
+        opts = options_by_need.get(n["id"], [])
+        result.append({
+            "id":           n["id"],
+            "item":         n["item"],
+            "item_display": disp(n["item"]),
+            "label":        n["label"],
+            "need_type":    n["need_type"],
+            "qty_per_10k":  float(n["qty_per_10k"]),
+            "unit":         n["unit"],
+            "group_key":    n["group_key"],
+            "choice_group": n["choice_group"],
+            "is_default":   n["is_default"],
+            "food_group":   n["food_group"],
+            "group_size":   int(n["group_size"] or 0),
+            # Вода, электроэнергия и вычисления потребляются не только
+            # населением, поэтому их потребность собирается на странице
+            # из всех источников, а не берётся из нормы напрямую.
+            "shared":       n["item"] in ("Water", "Electricity", "Computing"),
+            "options":      opts,
+            "tree":         (medicine_tree(n["item"]) if n["item"] in MEDICINE_ITEMS
+                             else dedicated_tree(n["item"])),
+        })
+
+    # ── Пищевой подграф ─────────────────────────────────────────────
+    def food_options(item):
+        """Производители предмета внутри пищевой цепочки."""
+        out = []
+        for r in producer_rows.get(item, []):
+            if r["building"] not in FOOD_BUILDINGS and item not in CHAIN_ANY_BUILDING:
+                continue
+            out.append(make_option(r, r["rate"], produces=item))
+        return sort_options(out)
+
+    chain: dict[str, dict] = {}
+    roots = [n["item"] for n in needs if n["group_key"] == "food" and n["item"]]
+    roots += list(CHAIN_EXTRA_ROOTS)
+    queue, seen_c = list(roots), set(roots)
+    while queue:
+        cur_item = queue.pop(0)
+        opts = food_options(cur_item)
+        if not opts:
+            continue
+        chain[cur_item] = {
+            "item":         cur_item,
+            "item_display": disp(cur_item),
+            "options":      opts,
+            # Культура — то, что растёт на ферме; такие строки на последнем
+            # этапе будут раскладываться по полям.
+            "is_crop":      any(o["farm"] for o in opts),
+        }
+        for o in opts:
+            for i in o["inputs"]:
+                if chain_stop(i["item"]) or i["item"] in seen_c:
+                    continue
+                if any(r["building"] in FOOD_BUILDINGS
+                       for r in producer_rows.get(i["item"], [])):
+                    seen_c.add(i["item"])
+                    queue.append(i["item"])
+    for c in chain.values():
+        mark_preferred(c["item"], c["options"])
+    # У пайков по умолчанию работают оба куриных рецепта: птицефабрика даёт
+    # яйца и тушки разом, и брать только одно — значит выбрасывать другое.
+    # Тофу с овощами остаётся на усмотрение — его включают галочкой.
+    for o in chain.get("Food Pack", {}).get("options", []):
+        if any(i["item"] in ("Eggs", "Meat") for i in o["inputs"]):
+            o["preferred"] = True
+
+    # ── Переработка излишков ────────────────────────────────────────
+    # Предмет -> способы от него избавиться, от полезного к бесполезному.
+    # Годится только рецепт из одного входа: смеситель делает из кукурузы
+    # корм, но это производство, а не утилизация.
+    disposal: dict[str, list] = {}
+    for r in disposal_rows:
+        flows = flows_by_recipe.get(r["recipe_id"], {"inputs": [], "outputs": []})
+        if len(flows["inputs"]) != 1:
+            continue
+        kind = disposal_kind(flows["outputs"])
+        if not kind:
+            continue
+        o = make_option(r, r["rate"], produces=r["consumes"])
+        o["disposal"] = kind
+        disposal.setdefault(r["consumes"], []).append(o)
+    for item, opts in disposal.items():
+        # Порядок: сначала полезные способы, внутри способа — быстрые.
+        # Уровень здания выбирается на странице, поэтому оставляем все.
+        opts.sort(key=lambda o: (DISPOSAL_ORDER[o["disposal"]], -o["rate"]))
+
+    # ── Семейства, для которых уровень действительно решает ─────────
+    # Переключатель уровня имеет смысл там, где уровень — единственная ось
+    # выбора: хозтовары делает только семейство Assembly, анестетики — только
+    # Chemical Plant. А электроэнергию, кроме дизель-генераторов, дают ещё и
+    # обычные электрогенераторы, поэтому там выбирают рецептом, а не уровнем.
+    used_families: dict[str, set] = {}
+    def collect(opts):
+        # Побочные варианты в расчёт не берём: корм приходит и с мельницы,
+        # но выбирают его всё равно на смесителе. Иначе смеситель не попал бы
+        # в список уровней только из-за побочных источников.
+        opts = [o for o in opts if o["is_primary"]]
+        if not opts:
+            return
+        # Фермы настраиваются отдельной парой «ферма + удобрение», поэтому
+        # в список уровней зданий не попадают — иначе теплица оказалась бы
+        # сразу в двух местах.
+        if any(o["farm"] for o in opts):
+            return
+        fams = {o["family"] for o in opts}
+        if len(fams) != 1:
+            return
+        fam = fams.pop()
+        if len(fam_members.get(fam, [])) > 1:
+            used_families.setdefault(fam, set()).update(o["building"] for o in opts)
+    for n in result:
+        collect(n["options"])
+        for node in n["tree"]:
+            collect(node["options"])
+    for c in chain.values():
+        collect(c["options"])
+
+    families = []
+    for base, buildings in sorted(used_families.items()):
+        tiers = sorted(
+            ({"tier": tier_of(b), "building": b, "building_display": disp(b)}
+             for b in fam_members[base]),
+            key=lambda x: x["tier"],
+        )
+        # Базовое имя семейства («Assembly») зданием не является, поэтому
+        # переводить нечего. Берём название старшего уровня и снимаем цифру:
+        # «Сборочная линия V» -> «Сборочная линия».
+        top = tiers[-1]["building_display"]
+        display = re.sub(r"\s+(I{1,3}|IV|V|VI)$", "", top)
+        families.append({
+            "family":  base,
+            "display": display or disp(base),
+            "tiers":   tiers,
+            "max":     max(t["tier"] for t in tiers),
+        })
+
+    prefs = {}
+    if g.get("user"):
+        raw = _get_user_setting(g.user["id"], "population_prefs")
+        if raw:
+            try:
+                prefs = json.loads(raw)
+            except Exception:
+                prefs = {}
+
+    # Справочник ферм: какие удобрения на каждой вообще применимы.
+    farms = []
+    for fb in FARM_BUILDINGS:
+        ferts, seen_f = [], set()
+        for rows in producer_rows.values():
+            for r in rows:
+                if r["building"] != fb:
+                    continue
+                f = next((i["item"] for i in
+                          flows_by_recipe.get(r["recipe_id"], {}).get("inputs", [])
+                          if i["item"].startswith("Fertilizer")), None)
+                if f not in seen_f:
+                    seen_f.add(f)
+                    ferts.append({"item": f, "display": disp(f) if f else None})
+        if not seen_f:
+            continue
+        ferts.sort(key=lambda x: (x["item"] is not None, x["item"] or ""))
+        farms.append({"building": fb, "display": disp(fb), "fertilizers": ferts})
+
+    # ── Удобрения ───────────────────────────────────────────────────
+    # Что именно нужно, решает выбор удобрения слева. Цепочка короткая:
+    # второе делается из первого, первое — с органическим или без него,
+    # органическое — из компоста, который план и так производит.
+    fert = {}
+    for it in ("Fertilizer II", "Fertilizer I", "Fertilizer (Organic)"):
+        opts = sort_options([make_option(r, r["rate"], produces=it)
+                             for r in producer_rows.get(it, [])])
+        if not opts:
+            continue
+        # По умолчанию органическое делаем с дёрном: компоста уходит втрое
+        # меньше, а дёрн копают экскаватором и девать его всё равно некуда.
+        if it == "Fertilizer (Organic)":
+            for o in opts:
+                if any(i["item"] == "Dirt" for i in o["inputs"]):
+                    o["preferred"] = True
+        fert[it] = {"item": it, "item_display": disp(it), "options": opts}
+
+    sapling = None
+    sap_opts = sort_options([make_option(r, r["rate"], produces="Tree Sapling")
+                             for r in producer_rows.get("Tree Sapling", [])])
+    if sap_opts:
+        sapling = {"item": "Tree Sapling", "item_display": disp("Tree Sapling"),
+                   "options": sap_opts}
+
+    return jsonify({
+        "fert":            fert,
+        "sapling":         sapling,
+        "needs":           result,
+        "families":        families,
+        "farms":           farms,
+        "chain":           chain,
+        "disposal":        disposal,
+        "base_population": 10000,
+        "grown_items":     grown_items,
+        "prefs":           prefs,
+    })
 
 
 # ─────────────────────────────────────────────────────────────────
