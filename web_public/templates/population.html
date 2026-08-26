@@ -1,0 +1,3208 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" class="{{ 'dark' if theme == 'dark' else '' }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ t('population.title') }} — CoI Planner</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <meta name="description" content="{{ t('population.subtitle') }}">
+  <script>
+    (function(){
+      var t = localStorage.getItem('coi_theme');
+      if (t === 'dark') document.documentElement.classList.add('dark');
+      else document.documentElement.classList.remove('dark');
+    })();
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' };</script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>[x-cloak] { display: none !important; }</style>
+</head>
+
+<body class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 min-h-screen"
+      x-data="populationCalc()" x-init="init()">
+
+<header class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm sticky top-0 z-20">
+  <div class="max-w-screen-2xl mx-auto px-4 py-2.5 flex flex-wrap items-center gap-3">
+    <span class="text-base font-bold tracking-tight shrink-0 inline-flex items-center gap-1.5">
+      <img src="/static/favicon.svg" alt="" class="w-5 h-5">CoI Planner
+    </span>
+    <span class="text-sm text-slate-500 dark:text-slate-400 border-l border-slate-300 dark:border-slate-600 pl-3">
+      {{ t('population.title') }}
+    </span>
+    <div class="flex-1"></div>
+
+    <!-- Тема: как и везде, хранится в localStorage и не перезагружает страницу -->
+    <button @click="toggleTheme()"
+            class="shrink-0 w-8 h-8 rounded-lg border border-slate-200 dark:border-slate-600
+                   flex items-center justify-center text-sm
+                   hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+            :title="isDark ? 'Light mode' : 'Dark mode'">
+      <span x-text="isDark ? '🌙' : '☀️'"></span>
+    </button>
+
+    <!-- Язык: параметром в адресе, страница остаётся та же -->
+    <div class="shrink-0 flex rounded-lg border border-slate-200 dark:border-slate-600 text-xs overflow-hidden">
+      {% for lc, lname in [('en', 'EN'), ('ru', 'РУ')] %}
+      <button @click="switchLang('{{ lc }}')"
+              class="px-2 py-1.5 transition-colors {{ 'bg-blue-600 text-white' if lang == lc else 'bg-white dark:bg-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-600' }}">{{ lname }}</button>
+      {% endfor %}
+    </div>
+
+    <a href="/about"
+       class="shrink-0 px-3 py-1.5 text-sm text-slate-500 dark:text-slate-400
+              hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
+      {{ t('nav.about') }}
+    </a>
+
+    <a href="/" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600
+                       hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">← {{ t('population.back') }}</a>
+  </div>
+</header>
+
+<div class="max-w-screen-2xl mx-auto px-4 py-4 grid grid-cols-1 lg:grid-cols-[17rem_1fr] gap-4 items-start">
+
+  <!-- ── ЛЕВАЯ ПАНЕЛЬ ────────────────────────────────────────────────── -->
+  <aside class="lg:sticky lg:top-16 bg-white dark:bg-slate-800 rounded-xl border border-slate-200
+                dark:border-slate-700 p-4 space-y-5 max-h-[calc(100vh-5rem)] overflow-y-auto">
+
+    <div>
+      <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+        {{ t('population.population') }}
+      </label>
+      <input type="number" min="1" step="100" x-model.number="draft.population"
+             @input="scheduleCommit()" @change="commitDrafts()"
+             @keydown.enter="commitDrafts()"
+             class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600
+                    bg-white dark:bg-slate-700 text-lg font-semibold tabular-nums
+                    focus:outline-none focus:ring-2 focus:ring-blue-400">
+    </div>
+
+    <!-- Древесина: сколько её нужно поселению. Отсюда берётся потребность
+         в саженцах, а те растут на тех же полях, что и культуры. -->
+    <div x-show="sapling">
+      <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+        {{ t('population.wood_need') }}
+      </label>
+      <input type="number" min="0" step="10" x-model.number="draft.woodNeed"
+             @input="scheduleCommit()" @change="commitDrafts()"
+             @keydown.enter="commitDrafts()"
+             class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600
+                    bg-white dark:bg-slate-700 tabular-nums
+                    focus:outline-none focus:ring-2 focus:ring-blue-400">
+      <div x-show="saplingNeed > 0" class="text-xs text-slate-500 dark:text-slate-400 mt-1"
+           x-text="'{{ t('population.wood_saplings') }}'.replace('{n}', fmt(saplingNeed, 2))"></div>
+    </div>
+
+    <!-- Пайки: спрос задаётся руками, потребности населения у них нет. -->
+    <div x-show="chain['Food Pack']">
+      <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+        {{ t('population.packs_need') }}
+      </label>
+      <input type="number" min="0" step="5" x-model.number="draft.packNeed"
+             @input="scheduleCommit()" @change="commitDrafts()"
+             @keydown.enter="commitDrafts()"
+             class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600
+                    bg-white dark:bg-slate-700 tabular-nums
+                    focus:outline-none focus:ring-2 focus:ring-blue-400">
+    </div>
+
+    <!-- Уровень лекарств: объём потребления одинаков на всех уровнях,
+         отличается только эффект и производственная цепочка. -->
+    <div x-show="medicineOptions.length">
+      <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+        {{ t('population.medicine') }}
+      </label>
+      <select @change="medicine = $event.target.value === '' ? null
+                                 : Number($event.target.value); save()"
+              class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600
+                    bg-white dark:bg-slate-700 text-sm
+                    focus:outline-none focus:ring-2 focus:ring-blue-400">
+        <option value="" :selected="medicine === null">{{ t('population.medicine_none') }}</option>
+        <template x-for="m in medicineOptions" :key="m.id">
+          <option :value="m.id" :selected="m.id === medicine" x-text="needName(m)"></option>
+        </template>
+      </select>
+    </div>
+
+    <!-- Ферма и удобрение — одни на всё поселение. По этой паре и
+         подбирается рецепт для каждой культуры. -->
+    <div x-show="farms.length">
+      <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+        {{ t('population.farm') }}
+      </label>
+      <select :value="farm" @change="setFarm($event.target.value)"
+              class="w-full px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600
+                     bg-white dark:bg-slate-700 text-sm">
+        <template x-for="f in farms" :key="f.building">
+          <option :value="f.building" x-text="f.display"></option>
+        </template>
+      </select>
+
+      <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400
+                    mt-2.5 mb-1.5">{{ t('population.fertilizer') }}</label>
+      <select :value="fertilizer === null ? '' : fertilizer"
+              @change="setFertilizer($event.target.value || null)"
+              :disabled="fertilizersForFarm.length < 2"
+              class="w-full px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600
+                     bg-white dark:bg-slate-700 text-sm disabled:opacity-50">
+        <template x-for="fz in fertilizersForFarm" :key="fz.item || 'none'">
+          <option :value="fz.item === null ? '' : fz.item"
+                  x-text="fz.display || '{{ t('population.no_fertilizer') }}'"></option>
+        </template>
+      </select>
+    </div>
+
+    <!-- Уровни зданий: у каждого семейства свой, они прокачиваются независимо -->
+    <div x-show="families.length">
+      <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+        {{ t('population.tiers') }}
+      </label>
+      <div class="space-y-1.5">
+        <template x-for="f in families" :key="f.family">
+          <div class="flex items-center gap-2">
+            <span class="text-sm flex-1 min-w-0 truncate" x-text="f.display" :title="f.display"></span>
+            <select :value="tiers[f.family]" @change="setTier(f.family, Number($event.target.value))"
+                    class="w-20 px-1.5 py-1 rounded border border-slate-300 dark:border-slate-600
+                           bg-white dark:bg-slate-700 text-sm shrink-0">
+              <template x-for="t in f.tiers" :key="t.tier">
+                <option :value="t.tier" x-text="romanOf(t.tier)"></option>
+              </template>
+            </select>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ── ИТОГИ ─────────────────────────────────────────────────────── -->
+    <div class="pt-4 border-t border-slate-200 dark:border-slate-700 space-y-2">
+      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {{ t('population.totals') }}
+      </div>
+      <div class="flex justify-between text-sm">
+        <span class="text-slate-500 dark:text-slate-400">{{ t('population.buildings') }}</span>
+        <span class="font-semibold tabular-nums" x-text="fmt(totals.buildings, 0)"></span>
+      </div>
+      <div class="flex justify-between text-sm">
+        <span class="text-slate-500 dark:text-slate-400">{{ t('population.total_workers') }}</span>
+        <span class="font-semibold tabular-nums" x-text="fmt(totals.workers, 0)"></span>
+      </div>
+      <div class="pt-2 border-t border-slate-100 dark:border-slate-700">
+        <div class="text-xs text-slate-500 dark:text-slate-400 mb-1">{{ t('population.total_maintenance') }}</div>
+        <template x-if="totals.maintenance.length">
+          <div class="space-y-1">
+            <template x-for="m in totals.maintenance" :key="m.item">
+              <div class="flex justify-between items-center text-sm">
+                <span class="inline-flex items-center gap-1.5 min-w-0">
+                  <img :src="iconOf(m.item)" alt="" class="w-4 h-4 shrink-0" @error="$el.style.display='none'">
+                  <span class="truncate" x-text="m.item_display"></span>
+                </span>
+                <span class="font-semibold tabular-nums shrink-0 ml-2" x-text="fmt(m.qty, 2)"></span>
+              </div>
+            </template>
+          </div>
+        </template>
+        <template x-if="!totals.maintenance.length">
+          <div class="text-sm text-slate-400">—</div>
+        </template>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── ПРАВАЯ ЧАСТЬ ────────────────────────────────────────────────── -->
+  <main class="space-y-4">
+    <div x-show="loading" class="text-center py-16 text-slate-400">{{ t('population.loading') }}</div>
+
+    <!-- ── РАЗДЕЛЫ ──────────────────────────────────────
+         Все разделы живут по одним правилам: сворачиваются, переставляются
+         мышью и рисуются в общей рамке. Различается только тело: карточки
+         производства, плитки сводки или таблица полей. -->
+    <template x-for="sec in panels" :key="sec.key">
+      <!-- overflow-hidden тут нельзя: окно выбора рецепта выпадает за
+           границу раздела и оказалось бы обрезано. Углы шапке скругляем
+           отдельно, иначе её фон вылезал бы за скруглённую рамку. -->
+      <section x-show="!loading && sec.filled"
+               class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200
+                      dark:border-slate-700"
+               :class="dragKey === sec.key ? 'ring-2 ring-blue-400 opacity-60' : ''"
+               @dragover.prevent="overSection(sec.key)" @drop.prevent>
+        <div class="px-4 py-2 bg-slate-100 dark:bg-slate-700/50 border-b border-slate-200
+                    dark:border-slate-700 text-sm font-semibold flex items-center gap-2
+                    select-none cursor-move"
+             :class="collapsed[sec.key] ? 'rounded-xl' : 'rounded-t-xl'"
+             draggable="true" @dragstart="startDrag(sec.key)" @dragend="endDrag()">
+          <button type="button" @click.stop="toggleSection(sec.key)"
+                  :title="'{{ t('population.collapse') }}'"
+                  class="w-5 h-5 flex items-center justify-center rounded shrink-0
+                         hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
+            <svg class="w-3 h-3 transition-transform" viewBox="0 0 20 20" fill="currentColor"
+                 :class="collapsed[sec.key] ? '-rotate-90' : ''">
+              <path d="M4 6.5h12L10 14z"></path>
+            </svg>
+          </button>
+          <span x-text="sec.title"></span>
+          <div class="flex-1"></div>
+          <span class="text-slate-400 dark:text-slate-500 tracking-tighter"
+                :title="'{{ t('population.reorder') }}'">⋮⋮</span>
+        </div>
+
+        <template x-if="!collapsed[sec.key]">
+        <div>
+
+          <!-- Карточки производства -->
+          <template x-if="sec.type === 'rows'">
+            <div>
+            <template x-for="(r, idx) in sec.rows" :key="r.key">
+              <div class="px-3 py-2.5"
+                   :class="[!r.level && idx ? 'border-t border-slate-100 dark:border-slate-700' : '',
+                            (idx && r.subTitle) ||
+                            (idx && !r.level && r.foodGroup && r.foodGroup !== sec.prevGroup[idx])
+                              ? '!border-t-4 !border-slate-300 dark:!border-slate-500' : '']">
+
+                <div x-show="r.subTitle"
+                     class="text-xs font-semibold uppercase tracking-wide
+                            text-slate-500 dark:text-slate-400 mb-2"
+                     x-text="r.subTitle"></div>
+
+                <!-- Снятая с расчёта позиция: нули по всем колонкам ничего не
+                     говорят, поэтому оставляем только галочку и название —
+                     иначе позицию нечем вернуть в расчёт. -->
+                <template x-if="r.off">
+                  <label class="flex items-center gap-3 cursor-pointer">
+                    <input type="checkbox" x-model="enabled[r.need ? r.need.id : 0]"
+                           @change="save()" class="accent-blue-600">
+                    <span class="inline-flex items-center gap-1.5">
+                      <img :src="iconOf(r.item)" alt="" class="w-4 h-4"
+                           @error="$el.style.display='none'">
+                      <span x-text="r.item_display"></span>
+                    </span>
+                  </label>
+                </template>
+
+                <template x-if="!r.off">
+                <div>
+                <div class="flex flex-wrap items-start gap-3"
+                     :style="r.level ? 'margin-left:' + (r.level * 18) + 'px' : ''">
+
+                  <!-- Линия дерева у вложенных элементов -->
+                  <div x-show="r.level" class="self-stretch flex items-start pt-1 -ml-2">
+                    <span class="text-slate-300 dark:text-slate-600 select-none">&#9492;</span>
+                  </div>
+
+                  <input type="checkbox" x-show="r.need" x-model="enabled[r.need ? r.need.id : 0]"
+                         @change="save()" class="accent-blue-600 mt-1.5">
+
+                  <div class="min-w-44">
+                    <div class="flex items-center gap-1.5">
+                      <img :src="iconOf(r.item)" alt="" class="w-4 h-4" @error="$el.style.display='none'">
+                      <span :class="r.level ? '' : 'font-medium'" x-text="r.item_display"></span>
+                      <span x-show="r.need && r.need.need_type !== 0"
+                            class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded"
+                            :class="r.need && r.need.need_type === 1
+                                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                                    : 'bg-slate-200 text-slate-600 dark:bg-slate-600 dark:text-slate-300'"
+                            x-text="r.need ? typeLabel(r.need.need_type) : ''"></span>
+                    </div>
+                    <div class="font-semibold tabular-nums" :class="r.level ? 'text-base' : 'text-lg'"
+                         x-text="fmt(r.qty, 2) + ' ' + unitLabel(r.need ? r.need.unit : 'per_min')"></div>
+                    <div x-show="r.surplus > 0.001"
+                         class="text-[11px] text-amber-600 dark:text-amber-400 tabular-nums"
+                         x-text="'{{ t('population.surplus') }} ' + fmt(r.surplus, 2)"></div>
+                  </div>
+
+                  <div class="min-w-56 flex-1">
+                    <!-- Развилка: у предмета несколько рецептов по сырью.
+                         Отмечаем галочками, какие разрешены; очередь между ними
+                         определяется ценой земли, а не рукой. Обычная строка
+                         обходится выпадающим списком из recipeCell. -->
+                    <template x-if="forkKinds(r).length > 1">
+                      <div class="relative" @click.outside="closePickerFor(r)">
+                        <div x-html="forkBuildingCell(r)"></div>
+                        <button type="button" @click="togglePicker(r)"
+                                class="mt-0.5 w-full max-w-72 flex items-center gap-2 px-2 py-1 rounded
+                                       border border-slate-300 dark:border-slate-600
+                                       bg-white dark:bg-slate-700 text-sm text-left
+                                       hover:border-blue-400 transition-colors">
+                          <span class="flex-1 min-w-0 truncate" x-text="forkLabel(r)"></span>
+                          <svg class="w-3 h-3 shrink-0 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M4 6.5h12L10 14z"></path>
+                          </svg>
+                        </button>
+
+                        <template x-if="picker && picker.item === r.item">
+                          <div class="absolute left-0 top-full z-30 mt-1 w-96 max-w-[90vw] p-3 space-y-2
+                                      rounded-xl border border-slate-300 dark:border-slate-600
+                                      bg-white dark:bg-slate-800 shadow-xl">
+                            <div class="text-xs text-slate-500 dark:text-slate-400">
+                              {{ t('population.fork_hint') }}
+                            </div>
+
+                            <!-- Группа галочек, от дешёвой земли к дорогой -->
+                            <div class="space-y-0.5 max-h-72 overflow-y-auto">
+                              <template x-for="k in kindsOf(picker.item)" :key="k">
+                                <label class="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer
+                                              hover:bg-slate-100 dark:hover:bg-slate-700">
+                                  <input type="checkbox" :checked="picker.on.includes(k)"
+                                         :disabled="picker.on.length < 2 && picker.on.includes(k)"
+                                         @change="pickerToggle(k)"
+                                         class="accent-blue-600 disabled:opacity-40 shrink-0">
+                                  <span class="flex-1 min-w-0">
+                                    <span class="flex items-baseline gap-2">
+                                      <span class="truncate" x-text="kindTitle(picker.item, k)"></span>
+                                      <span x-show="picker.on.includes(k) && k === pickerMain()"
+                                            class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded
+                                                   bg-blue-100 text-blue-700
+                                                   dark:bg-blue-900/40 dark:text-blue-300 shrink-0">
+                                        {{ t('population.fork_main') }}
+                                      </span>
+                                      <span x-show="picker.on.includes(k) && k !== pickerMain()"
+                                            class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded
+                                                   bg-slate-200 text-slate-600
+                                                   dark:bg-slate-600 dark:text-slate-300 shrink-0">
+                                        {{ t('population.fork_spare') }}
+                                      </span>
+                                    </span>
+                                    <span class="block text-[11px] text-slate-500 dark:text-slate-400 truncate"
+                                          x-text="kindSub(picker.item, k)"></span>
+                                  </span>
+                                  <span class="text-[11px] tabular-nums text-slate-500 dark:text-slate-400
+                                               shrink-0 text-right"
+                                        :title="'{{ t('population.fork_land_hint') }}'"
+                                        x-text="fmt(landCost(picker.item, k), 4)"></span>
+                                </label>
+                              </template>
+                            </div>
+
+                            <div class="flex justify-end pt-1">
+                              <button type="button" @click="closePicker()"
+                                      class="px-3 py-1 rounded-lg text-sm bg-blue-600 text-white
+                                             hover:bg-blue-700 transition-colors">
+                                {{ t('population.apply') }}
+                              </button>
+                            </div>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+
+                    <template x-if="forkKinds(r).length <= 1">
+                      <div x-html="recipeCell(r)"></div>
+                    </template>
+                    <template x-for="w in (r.warn || [])" :key="w">
+                      <div class="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5" x-text="w"></div>
+                    </template>
+                    <div x-show="r.need && farmShort(r.need)"
+                         class="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5">
+                      {{ t('population.farm_unavailable') }}
+                    </div>
+                    <div x-show="r.need && !farmShort(r.need) && tierShort(r.need)"
+                         class="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5">
+                      {{ t('population.tier_unavailable') }}
+                    </div>
+                  </div>
+
+                  <div class="text-right tabular-nums min-w-24">
+                    <div class="text-xs text-slate-500 dark:text-slate-400">{{ t('population.machines') }}</div>
+                    <div class="text-slate-500 dark:text-slate-400"
+                         x-text="r.opt && !r.opt.dumping ? fmt(r.machines, 2) : '—'"></div>
+                    <div class="font-semibold"
+                         x-text="r.opt && !r.opt.dumping
+                                   ? r.built + ' ' + '{{ t('population.build') }}' : ''"></div>
+                  </div>
+                  <div class="text-right tabular-nums min-w-20">
+                    <div class="text-xs text-slate-500 dark:text-slate-400">{{ t('population.workers') }}</div>
+                    <div x-text="fmt(r.workers, 0)"></div>
+                  </div>
+                  <div class="text-right tabular-nums min-w-24">
+                    <div class="text-xs text-slate-500 dark:text-slate-400">{{ t('population.power') }}</div>
+                    <div x-text="fmt(r.power, 0)"></div>
+                  </div>
+                  <!-- Вычисления есть далеко не у всех: в удобрениях и
+                       коммунальном колонка стояла пустой. Показываем её
+                       только там, где в разделе кто-то их тратит. -->
+                  <div x-show="sec.hasComputing" class="text-right tabular-nums min-w-20">
+                    <div class="text-xs text-slate-500 dark:text-slate-400">{{ t('population.computing') }}</div>
+                    <div x-text="r.computing ? fmt(r.computing, 1) : '—'"></div>
+                  </div>
+                </div>
+
+                <!-- Из чего складывается потребность -->
+                <!-- Именно x-if, а не x-show: рядом стоит :style, а он переписывает
+                     атрибут целиком и стирает display:none, выставленный x-show. -->
+                <template x-if="showParts(r)">
+                <div class="mt-1"
+                     :style="'margin-left:' + (28 + r.level * 18) + 'px'">
+                  <div class="text-sm max-w-2xl pl-3 border-l-2 border-slate-200 dark:border-slate-600">
+                    <template x-for="pt in r.parts" :key="pt.label + (pt.ret ? '-' : '+')">
+                      <div class="flex justify-between gap-4 py-0.5 border-b border-dashed
+                                  border-slate-100 dark:border-slate-700">
+                        <span :class="pt.ret ? 'text-emerald-600 dark:text-emerald-400' : ''"
+                              x-text="pt.label + (pt.ret ? ' · {{ t('population.returned') }}' : '')"></span>
+                        <span class="tabular-nums shrink-0"
+                              :class="pt.ret ? 'text-emerald-600 dark:text-emerald-400' : ''"
+                              x-text="(pt.ret ? '−' : '') + fmt(Math.abs(pt.qty), 2)"></span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+                </template>
+
+                <!-- Сырьё и побочный выход -->
+                <div class="mt-2" :style="'margin-left:' + (28 + r.level * 18) + 'px'"
+                     x-html="flowsCell(r)"></div>
+                </div>
+                </template>
+              </div>
+            </template>
+            </div>
+          </template>
+
+          <!-- Плитки сводки -->
+          <template x-if="sec.type === 'chips'">
+          <div class="p-3 flex flex-wrap gap-2">
+            <template x-for="i in sec.items" :key="i.item || i.item_display">
+              <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-sm whitespace-nowrap"
+                    :class="sec.key === 'outputs' ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/25 dark:border-emerald-700'
+                                                  : 'border-slate-200 dark:border-slate-600'">
+                <template x-if="i.item">
+                  <img :src="iconOf(i.item)" alt="" class="w-4 h-4" @error="$el.style.display='none'">
+                </template>
+                <span x-text="i.item_display"></span>
+                <template x-if="!i.unknown">
+                  <span class="tabular-nums font-semibold" x-text="fmt(i.qty, 2)"></span>
+                </template>
+              </span>
+            </template>
+          </template>
+
+          <!-- Поля и переработка -->
+          <template x-if="sec.type === 'grown'">
+            <div class="p-3 space-y-4">
+              <div class="flex flex-wrap items-baseline gap-x-2 text-sm">
+                <span class="text-slate-500 dark:text-slate-400">{{ t('population.fields_total') }}</span>
+                <span class="text-lg font-semibold tabular-nums" x-text="farmLayout.farms"></span>
+                <span x-show="farmLayout.farms > farmLayout.min"
+                      class="text-xs text-slate-500 dark:text-slate-400"
+                      x-text="'{{ t('population.fields_min_note') }}'.replace('{n}', farmLayout.min)"></span>
+              </div>
+
+              <div class="space-y-1">
+                <template x-for="g in farmLayout.groups" :key="g.key">
+                  <div class="flex items-start gap-3 px-2 py-1.5 rounded-lg border
+                              border-slate-200 dark:border-slate-600">
+                    <span class="shrink-0 font-semibold tabular-nums w-10 text-right"
+                          x-text="g.count + ' ×'"></span>
+                    <div class="flex flex-wrap gap-x-4 gap-y-1">
+                      <template x-for="sl in g.slots" :key="sl.item">
+                        <span class="inline-flex items-center gap-1 whitespace-nowrap">
+                          <img :src="iconOf(sl.item)" alt="" class="w-4 h-4"
+                               @error="$el.style.display='none'">
+                          <span x-text="sl.display"></span>
+                          <span x-show="sl.n > 1" class="text-slate-400 dark:text-slate-500"
+                                x-text="'×' + sl.n"></span>
+                          <span class="text-slate-500 dark:text-slate-400 tabular-nums"
+                                x-text="fmt(sl.share, 2)"></span>
+                        </span>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="text-sm w-full max-w-3xl">
+                  <thead class="text-xs text-slate-500 dark:text-slate-400">
+                    <tr>
+                      <th class="text-left font-normal pb-1">{{ t('population.crop') }}</th>
+                      <th class="text-right font-normal pb-1 px-3">{{ t('population.fields_need') }}</th>
+                      <th class="text-right font-normal pb-1 px-3">{{ t('population.fields_fact') }}</th>
+                      <th class="text-right font-normal pb-1 px-3">{{ t('population.crop_need') }}</th>
+                      <th class="text-right font-normal pb-1 px-3">{{ t('population.cover_out') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+                    <template x-for="c in farmLayout.cover" :key="c.item">
+                      <tr>
+                        <td class="py-1">
+                          <span class="inline-flex items-center gap-1.5">
+                            <img :src="iconOf(c.item)" alt="" class="w-4 h-4"
+                                 @error="$el.style.display='none'">
+                            <span x-text="c.display"></span>
+                          </span>
+                        </td>
+                        <td class="text-right tabular-nums px-3 text-slate-500 dark:text-slate-400"
+                            x-text="fmt(c.need, 2)"></td>
+                        <td class="text-right tabular-nums px-3">
+                          <span x-text="fmt(c.got, 2)"></span>
+                          <span x-show="c.extra > 0.005"
+                                class="text-xs text-amber-600 dark:text-amber-400"
+                                x-text="'+' + fmt(c.extra, 2)"></span>
+                          <span x-show="c.extra < -0.005"
+                                class="text-xs text-emerald-600 dark:text-emerald-400"
+                                x-text="fmt(c.extra, 2)"></span>
+                        </td>
+                        <td class="text-right tabular-nums px-3 text-slate-500 dark:text-slate-400"
+                            x-text="fmt(c.needQty, 2)"></td>
+                        <td class="text-right tabular-nums px-3 font-semibold">
+                          <span x-text="fmt(c.out, 2)"></span>
+                          <span x-show="c.outExtra > 0.005"
+                                class="text-xs font-normal text-amber-600 dark:text-amber-400"
+                                x-text="'+' + fmt(c.outExtra, 2)"></span>
+                          <span x-show="c.outExtra < -0.005"
+                                class="text-xs font-normal text-emerald-600 dark:text-emerald-400"
+                                x-text="fmt(c.outExtra, 2)"></span>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                  <tfoot>
+                    <tr class="border-t-2 border-slate-300 dark:border-slate-500 font-semibold">
+                      <td class="py-1">{{ t('population.totals') }}</td>
+                      <td class="text-right tabular-nums px-3 text-slate-500 dark:text-slate-400"
+                          x-text="fmt(farmLayout.totals.need, 2)"></td>
+                      <td class="text-right tabular-nums px-3">
+                        <span x-text="fmt(farmLayout.totals.got, 2)"></span>
+                        <span x-show="farmLayout.totals.extra > 0.005"
+                              class="text-xs font-normal text-amber-600 dark:text-amber-400"
+                              x-text="'+' + fmt(farmLayout.totals.extra, 2)"></span>
+                      </td>
+                      <!-- Сырьё не суммируется: культуры разные. -->
+                      <td></td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              <!-- Древесина: саженцы уходят в деревья один к одному,
+                   дерево даёт двадцать древесины. Ровно столько, сколько
+                   заказано слева, — излишек саженцев идёт в переработку. -->
+              <div x-show="woodNeed > 0" class="space-y-2 pt-1">
+                <div class="text-xs font-semibold uppercase tracking-wide
+                            text-slate-500 dark:text-slate-400">
+                  {{ t('population.wood') }}
+                </div>
+                <div class="rounded-lg border border-slate-200 dark:border-slate-600 px-3 py-2">
+                  <div class="flex flex-wrap items-start gap-3">
+                    <div class="min-w-40">
+                      <div class="flex items-center gap-1.5">
+                        <img :src="iconOf('Wood')" alt="" class="w-4 h-4"
+                             @error="$el.style.display='none'">
+                        <span>{{ t('population.wood') }}</span>
+                      </div>
+                      <div class="text-lg font-semibold tabular-nums"
+                           x-text="fmt(woodNeed, 2) + ' ' + unitLabel('per_min')"></div>
+                    </div>
+                    <div class="min-w-56 flex-1 text-sm text-slate-500 dark:text-slate-400"
+                         x-text="'{{ t('population.wood_note') }}'.replace('{n}', WOOD_PER_TREE)"></div>
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                    <span class="inline-flex items-center gap-1 whitespace-nowrap">
+                      <img :src="iconOf('Tree Sapling')" alt="" class="w-4 h-4"
+                           @error="$el.style.display='none'">
+                      <span x-text="sapling ? sapling.item_display : ''"></span>
+                      <span class="tabular-nums text-slate-500 dark:text-slate-400"
+                            x-text="fmt(saplingNeed, 2)"></span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Переработка. Режем по производимому, а не по сырью: важно,
+                   сколько строить биореакторов и смесителей. -->
+              <div x-show="recycling.length" class="space-y-2 pt-1">
+                <div class="text-xs font-semibold uppercase tracking-wide
+                            text-slate-500 dark:text-slate-400">
+                  {{ t('population.recycling') }}
+                </div>
+                <template x-for="g in recycling" :key="g.key">
+                  <div class="rounded-lg border border-slate-200 dark:border-slate-600 px-3 py-2">
+                    <div class="flex flex-wrap items-start gap-3">
+                      <div class="min-w-40">
+                        <div class="flex items-center gap-1.5">
+                          <img :src="iconOf(g.item)" alt="" class="w-4 h-4"
+                               @error="$el.style.display='none'">
+                          <span x-text="g.title"></span>
+                        </div>
+                        <div class="text-lg font-semibold tabular-nums"
+                             x-text="fmt(g.qty, 2) + ' ' + unitLabel('per_min')"></div>
+                      </div>
+
+                      <div class="min-w-56 flex-1">
+                        <template x-if="g.buildings.length > 1">
+                          <select class="w-full max-w-72 px-2 py-1 rounded border border-slate-300
+                                         dark:border-slate-600 bg-white dark:bg-slate-700 text-sm"
+                                  @change="setDispBuilding(g.kind, $event.target.value)">
+                            <template x-for="b in g.buildings" :key="b.building">
+                              <option :value="b.building" :selected="b.building === g.opt.building"
+                                      x-text="b.display"></option>
+                            </template>
+                          </select>
+                        </template>
+                        <template x-if="g.buildings.length <= 1">
+                          <div class="text-sm" x-text="g.opt.building_display"></div>
+                        </template>
+                      </div>
+
+                      <div class="text-right tabular-nums min-w-24">
+                        <div class="text-xs text-slate-500 dark:text-slate-400">{{ t('population.machines') }}</div>
+                        <div class="text-slate-500 dark:text-slate-400" x-text="fmt(g.machines, 2)"></div>
+                        <div class="font-semibold"
+                             x-text="g.built + ' ' + '{{ t('population.build') }}'"></div>
+                      </div>
+                      <div class="text-right tabular-nums min-w-20">
+                        <div class="text-xs text-slate-500 dark:text-slate-400">{{ t('population.workers') }}</div>
+                        <div x-text="fmt(g.workers, 0)"></div>
+                      </div>
+                      <div class="text-right tabular-nums min-w-24">
+                        <div class="text-xs text-slate-500 dark:text-slate-400">{{ t('population.power') }}</div>
+                        <div x-text="fmt(g.power, 0)"></div>
+                      </div>
+                      <div x-show="g.computing > 0.05" class="text-right tabular-nums min-w-20">
+                        <div class="text-xs text-slate-500 dark:text-slate-400">{{ t('population.computing') }}</div>
+                        <div x-text="fmt(g.computing, 1)"></div>
+                      </div>
+                    </div>
+
+                    <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                      <template x-for="i in g.items" :key="i.item">
+                        <span class="inline-flex items-center gap-1 whitespace-nowrap">
+                          <img :src="iconOf(i.item)" alt="" class="w-4 h-4"
+                               @error="$el.style.display='none'">
+                          <span x-text="i.display"></span>
+                          <span class="tabular-nums text-slate-500 dark:text-slate-400"
+                                x-text="fmt(i.qty, 2)"></span>
+                        </span>
+                      </template>
+                    </div>
+                    <div x-show="g.extras.length"
+                         class="mt-1 flex flex-wrap gap-x-3 gap-y-1
+                                text-emerald-600 dark:text-emerald-400">
+                      <template x-for="o in g.extras" :key="o.item">
+                        <span class="inline-flex items-center gap-1 whitespace-nowrap">+
+                          <img :src="iconOf(o.item)" alt="" class="w-4 h-4"
+                               @error="$el.style.display='none'">
+                          <span x-text="o.item_display"></span>
+                          <span class="tabular-nums" x-text="fmt(o.qty, 2)"></span>
+                        </span>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+
+        </div>
+        </template>
+      </section>
+    </template>
+
+  </main>
+</div>
+
+<script>
+function populationCalc() {
+  // Раскладка полей считается перебором, поэтому её результат кешируется —
+  // и намеренно вне реактивного объекта: запись в него прямо во время
+  // вычисления геттера снова дёрнула бы этот же геттер.
+  const layoutCache = {};   // подпись потребности -> готовая раскладка полей
+  // Цена вариантов в машинах поля считается рекурсивно по графу, поэтому
+  // тоже кешируется — ключ собирается из фермы, удобрения и уровней зданий.
+  const costCache = { sig: null, map: {} };
+  // План и сводка пересчитываются на каждое чтение, а читают их и карточки,
+  // и сводка, и панели — за одну перерисовку выходило под сотню миллисекунд.
+  // Кешируем по подписи входных данных: порядок разделов и свёрнутость в неё
+  // не входят, поэтому перетаскивание больше ничего не пересчитывает.
+  const planCache = { sig: null, value: null };
+  const sumCache  = { sig: null, value: null };
+
+  return {
+    loading:    true,
+    needs:      [],
+    families:   [],
+    grownItems: new Set(),
+    population: 10000,
+    choice:     {},   // ключ строки -> recipe_id (явный выбор пользователя)
+    tiers:      {},   // семейство зданий -> выбранный уровень
+    chain:       {},  // пищевой подграф: предмет -> производители
+    disposal:    {},  // предмет -> способы переработать: газ, компост, горелка
+    fert:        {},  // удобрения: предмет -> рецепты, которыми он делается
+    sapling:     null,// саженцы: те же фермы, что и у культур
+    woodNeed:    0,   // сколько древесины нужно поселению, единиц в минуту
+    packNeed:    0,   // сколько пайков нужно, единиц в минуту
+    // Числовые поля пишут сюда, а в расчёт значение уходит по выходу из
+    // поля или через три секунды тишины. Иначе каждая набранная цифра
+    // пересчитывала бы весь план, и панель заметно подтормаживала.
+    draft:      { population: 10000, woodNeed: 0, packNeed: 0 },
+    isDark:     document.documentElement.classList.contains('dark'),
+    chainChoice: {},  // предмет -> упорядоченные роды рецептов
+    farms:      [],   // справочник ферм и применимых на них удобрений
+    farm:       null, // выбранная ферма (одна на всё поселение)
+    fertilizer: null, // выбранное удобрение (одно на все фермы)
+    enabled:    {},   // need.id -> считать
+    medicine:   null,
+    sectionOrder: ['grown', 'food', 'fertilizer', 'utility',
+                   'health', 'goods', 'industrial', 'outputs'],
+    dispChoice: {},   // способ переработки -> выбранное здание
+    collapsed:  {},   // ключ раздела -> свёрнут
+    dragKey:    null, // раздел, который сейчас тащат
+    picker:     null, // открытая развилка: { item, on: [отмеченные роды] }
+
+    async init() {
+      const data = await (await fetch('/api/population/data')).json();
+      this.needs      = data.needs;
+      this.families   = data.families || [];
+      this.farms      = data.farms || [];
+      this.chain      = data.chain || {};
+      this.disposal   = data.disposal || {};
+      this.fert       = data.fert || {};
+      this.sapling    = data.sapling || null;
+      if (this.farms.length) {
+        // По умолчанию самая продуктивная связка: старшая теплица и
+        // сильнейшее удобрение.
+        const f = this.farms[this.farms.length - 1];
+        this.farm = f.building;
+        this.fertilizer = f.fertilizers[f.fertilizers.length - 1].item;
+      }
+      this.grownItems = new Set(data.grown_items || []);
+
+      for (const f of this.families) this.tiers[f.family] = f.max;
+      for (const n of this.needs) {
+        this.enabled[n.id] = true;
+        if (n.choice_group === 'medicine' && n.is_default) this.medicine = n.id;
+        // «Сброс машинами»: зданий не требует, объём загрязнения не считается.
+        if (n.item === 'Waste') {
+          n.options.push({
+            recipe_id: -1, building: 'Truck Dump',
+            building_display: '{{ t('population.truck_dump') }}',
+            family: 'Truck Dump', tier: 1, cycle_time_s: 0,
+            workers: 0, electricity_kw: 0, computing_tf: 0,
+            maintenance: [], rate: 0, inputs: [], outputs: [], dumping: true,
+          });
+        }
+      }
+
+      const p = data.prefs || {};
+      if (p.population) this.population = p.population;
+      if (p.tiers)      Object.assign(this.tiers, p.tiers);
+      if (p.farm)       this.farm = p.farm;
+      if ('fertilizer' in p) this.fertilizer = p.fertilizer;
+      if (p.choice)     Object.assign(this.choice, p.choice);
+      if (p.chainChoice) Object.assign(this.chainChoice, p.chainChoice);
+      if (p.enabled)    Object.assign(this.enabled, p.enabled);
+      if (p.collapsed)  Object.assign(this.collapsed, p.collapsed);
+      if (p.dispChoice) Object.assign(this.dispChoice, p.dispChoice);
+      if (p.woodNeed)   this.woodNeed = p.woodNeed;
+      if (p.packNeed)   this.packNeed = p.packNeed;
+      if (Array.isArray(p.sectionOrder) && p.sectionOrder.length) {
+        // Порядок мог устареть: добавился раздел или исчез. Берём известные
+        // ключи из сохранённого порядка, остальные дописываем следом.
+        const known = this.sectionOrder;
+        this.sectionOrder = [...p.sectionOrder.filter(k => known.includes(k)),
+                             ...known.filter(k => !p.sectionOrder.includes(k))];
+      }
+      if ('medicine' in p) this.medicine = p.medicine;
+
+      for (const k of ['population', 'woodNeed', 'packNeed']) this.draft[k] = this[k];
+      this.loading = false;
+    },
+
+    // ── сквозные элементы шапки ─────────────────────────────────────
+    toggleTheme() {
+      this.isDark = !this.isDark;
+      document.documentElement.classList.toggle('dark', this.isDark);
+      localStorage.setItem('coi_theme', this.isDark ? 'dark' : 'light');
+    },
+    switchLang(lc) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('lang', lc);
+      window.location.href = url.href;
+    },
+
+    // ── ввод чисел ──────────────────────────────────────────────────
+    scheduleCommit() {
+      clearTimeout(this._commitTimer);
+      this._commitTimer = setTimeout(() => this.commitDrafts(), 3000);
+    },
+    commitDrafts() {
+      clearTimeout(this._commitTimer);
+      let changed = false;
+      for (const k of ['population', 'woodNeed', 'packNeed']) {
+        const v = Math.max(0, Number(this.draft[k]) || 0);
+        if (this[k] !== v) { this[k] = v; changed = true; }
+      }
+      if (changed) this.save();
+    },
+
+    // ── сохранение выбора ───────────────────────────────────────────
+    save() {
+      clearTimeout(this._saveTimer);
+      this._saveTimer = setTimeout(() => {
+        fetch('/api/settings', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ population_prefs: JSON.stringify({
+            population: this.population, tiers: this.tiers,
+            farm: this.farm, fertilizer: this.fertilizer,
+            choice: this.choice, enabled: this.enabled, medicine: this.medicine,
+            chainChoice: this.chainChoice,
+            sectionOrder: this.sectionOrder, collapsed: this.collapsed,
+            dispChoice: this.dispChoice, woodNeed: this.woodNeed,
+            packNeed: this.packNeed,
+          })}),
+        }).catch(() => {});
+      }, 600);
+    },
+
+    // ── вспомогательное ─────────────────────────────────────────────
+    fmt(v, d) {
+      if (v === null || v === undefined || !isFinite(v)) return '—';
+      return Number(v).toLocaleString('{{ lang }}', { minimumFractionDigits: d, maximumFractionDigits: d });
+    },
+    iconOf(name) {
+      return '/static/icons/' + encodeURIComponent((name || '').replaceAll(' ', '_')) + '.png';
+    },
+    unitLabel(u) {
+      return u === 'kw' ? '{{ t('population.unit_kw') }}'
+           : u === 'tf' ? '{{ t('population.unit_tf') }}'
+                        : '{{ t('population.unit_per_min') }}';
+    },
+    romanOf(t) { return ['', 'I', 'II', 'III', 'IV', 'V', 'VI'][t] || String(t); },
+    // Группа предыдущего КОРНЯ: между строками одной группы разделителя быть
+    // не должно, а между ними могут стоять вложенные строки цепочки.
+    prevGroup(idx) {
+      const list = this.plan.food;
+      for (let i = idx - 1; i >= 0; i--) if (!list[i].level) return list[i].foodGroup;
+      return null;
+    },
+    // Разделы показываются в пользовательском порядке; неизвестные ключи
+    // (если раздел добавится позже) уходят в конец. Тип определяет, чем
+    // раздел наполнен: карточками, плитками или таблицей полей.
+    get panels() {
+      const by = {};
+      for (const sec of this.plan.sections) {
+        by[sec.key] = { ...sec, type: 'rows', filled: sec.rows.length > 0 };
+      }
+      const cat = (k) => this.summary.find(c => c.key === k) || { name: '', items: [] };
+      for (const k of ['industrial', 'outputs']) {
+        const c = cat(k);
+        by[k] = { key: k, title: c.name, type: 'chips',
+                  items: c.items, filled: c.items.length > 0 };
+      }
+      by.grown = { key: 'grown', title: '{{ t('population.cat_grown') }}',
+                   type: 'grown', filled: this.farmLayout.farms > 0 };
+      const out = [];
+      for (const k of this.sectionOrder) if (by[k]) { out.push(by[k]); delete by[k]; }
+      return [...out, ...Object.values(by)];
+    },
+    toggleSection(key) { this.collapsed[key] = !this.collapsed[key]; this.save(); },
+    startDrag(key) {
+      this.dragKey = key;
+      this._overKey = null;
+      // Пока раздел тащат, сворачиваем все: развёрнутые занимают по экрану
+      // каждый, и целиться некуда. После броска раскрываем обратно.
+      // Присваиваем разом: по ключу — это перерисовка на каждый раздел.
+      this._collapsedBefore = { ...this.collapsed };
+      this.collapsed = Object.fromEntries(this.sectionOrder.map(k => [k, true]));
+    },
+    overSection(key) {
+      // Повтор по тому же разделу пропускаем: иначе строки прыгали бы
+      // туда-сюда, пока курсор стоит на месте.
+      if (!this.dragKey || key === this.dragKey || this._overKey === key) return;
+      this._overKey = key;
+      const order = [...this.sectionOrder];
+      const from = order.indexOf(this.dragKey), to = order.indexOf(key);
+      if (from < 0 || to < 0) return;
+      order.splice(to, 0, ...order.splice(from, 1));
+      this.sectionOrder = order;
+    },
+    endDrag() {
+      if (this._collapsedBefore) {
+        this.collapsed = this._collapsedBefore;
+        this._collapsedBefore = null;
+      }
+      this.dragKey = null;
+      this._overKey = null;
+      this.save();
+    },
+    blockName(b) {
+      return b === 'population'   ? '{{ t('population.blk_population') }}'
+           : b === 'intermediate' ? '{{ t('population.blk_intermediate') }}'
+                                  : '{{ t('population.blk_crops') }}';
+    },
+    loadNames: { 'Электроэнергия': '{{ t('population.electricity') }}' },
+    catNames: {
+      food:    '{{ t('population.group_food') }}',
+      health:  '{{ t('population.group_health') }}',
+      goods:   '{{ t('population.group_goods') }}',
+      utility: '{{ t('population.group_utility') }}',
+      fertilizer: '{{ t('population.group_fertilizer') }}',
+    },
+    needName(n) { return n.item_display || this.loadNames[n.label] || n.label; },
+    typeLabel(t) {
+      return t === 0 ? '{{ t('population.produce') }}'
+           : t === 1 ? '{{ t('population.process') }}'
+                     : '{{ t('population.load') }}';
+    },
+    esc(s) {
+      return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    },
+    sumOf(rows, field) { return rows.reduce((s, r) => s + (r[field] || 0), 0); },
+    // Потребность населения, соответствующая строке цепочки (если есть).
+    needOf(r) {
+      if (r.need) return r.need;
+      return this.needs.find(n => n.group_key === 'food' && n.item === r.item) || null;
+    },
+
+
+    get medicineOptions() { return this.needs.filter(n => n.choice_group === 'medicine'); },
+
+    isActive(n) {
+      if (!this.enabled[n.id]) return false;
+      if (n.choice_group === 'medicine') return n.id === this.medicine;
+      return true;
+    },
+
+    // ── выбор рецепта ───────────────────────────────────────────────
+    tierOk(o) {
+      const t = this.tiers[o.family];
+      return t === undefined || o.tier <= t;
+    },
+    get fertilizersForFarm() {
+      const f = this.farms.find(x => x.building === this.farm);
+      return f ? f.fertilizers : [];
+    },
+    // Строка выращивается на ферме, если все её рецепты фермовые.
+    isFarmNeed(n) {
+      return !!(n && n.options.length && n.options.every(o => o.farm));
+    },
+    farmShort(n) {
+      return this.isFarmNeed(n) && !this.chosenOption('n' + n.id, n.options);
+    },
+    setFarm(building) {
+      this.farm = building;
+      const ferts = this.fertilizersForFarm;
+      // Удобрение могло стать неприменимым: у плантации их нет вовсе.
+      if (!ferts.some(f => f.item === this.fertilizer)) {
+        this.fertilizer = ferts.length ? ferts[ferts.length - 1].item : null;
+      }
+      this.dropUnavailable();
+      this.save();
+    },
+    setFertilizer(item) {
+      this.fertilizer = item;
+      this.dropUnavailable();
+      this.save();
+    },
+    // Что перестало производиться — снимаем с расчёта, строку оставляем.
+    dropUnavailable() {
+      for (const n of this.needs) {
+        if (this.farmShort(n) || this.tierShort(n)) this.enabled[n.id] = false;
+      }
+    },
+
+    // Две оси имеет смысл разделять там, где семейство одно, зданий
+    // несколько и рецепты внутри здания различаются: у органического
+    // удобрения это уровень смесителя и рецепт с дёрном или без. Иначе
+    // (вода, сборочные линии) обходимся одним списком.
+    twoAxis(options) {
+      if (!options || options.length < 2 || options.some(o => o.farm)) return false;
+      const f = new Set(), b = new Set(), k = new Set();
+      for (const o of options) { f.add(o.family); b.add(o.building); k.add(o.kind); }
+      return f.size === 1 && b.size > 1 && k.size > 1;
+    },
+    buildingsOf(options) {
+      const out = [];
+      for (const o of options) {
+        if (!out.some(x => x.building === o.building)) {
+          out.push({ building: o.building, display: o.building_display, tier: o.tier });
+        }
+      }
+      return out.sort((a, b) => a.tier - b.tier);
+    },
+    // Здание строки: явный выбор, иначе старшее из тех, что помещаются
+    // в выбранный слева уровень семейства.
+    pickBuilding(key, options) {
+      const want = this.choice['b:' + key];
+      if (want && options.some(o => o.building === want)) return want;
+      const fit = options.filter(o => this.tierOk(o));
+      const pool = fit.length ? fit : options;
+      return pool.reduce((a, o) => (!a || o.tier > a.tier ? o : a), null).building;
+    },
+
+    chosenOption(key, options) {
+      if (!options || !options.length) return null;
+      // Фермовые рецепты выбираются глобально — фермой и удобрением,
+      // а не построчно.
+      if (options.every(o => o.farm)) {
+        return options.find(o => o.farm === this.farm
+                              && o.fertilizer === this.fertilizer) || null;
+      }
+      if (this.twoAxis(options)) {
+        const b = this.pickBuilding(key, options);
+        let pool = options.filter(o => o.building === b);
+        if (!pool.length) pool = options;
+        const k = this.choice['k:' + key];
+        return pool.find(o => o.kind === k) || pool.find(o => o.preferred) || pool[0];
+      }
+      const explicit = options.find(o => o.recipe_id === this.choice[key]);
+      if (explicit) return explicit;
+      const fit  = options.filter(o => this.tierOk(o));
+      const pool = fit.length ? fit : options;
+      return pool.find(o => o.preferred) || pool[0];
+    },
+    setChoice(key, recipeId) { this.choice[key] = Number(recipeId); this.save(); },
+    setBuilding(key, b) { this.choice['b:' + key] = b; this.save(); },
+    setKind(key, k) { this.choice['k:' + key] = k; this.save(); },
+    // Здание для строки пищевой цепочки: там рецепт выбирают галочками,
+    // а уровень здания — отдельным списком.
+    setChainBuilding(item, b) { this.choice['b:chain:' + item] = b; this.save(); },
+
+    // Ни один вариант не помещается в выбранные уровни зданий.
+    tierShort(n) {
+      if (!n.options || !n.options.length) return false;
+      return !n.options.some(o => this.tierOk(o));
+    },
+    setTier(family, value) {
+      this.tiers[family] = value;
+      // Что стало непроизводимым на этом уровне — снимаем с расчёта,
+      // оставляя строку на месте с пояснением.
+      this.dropUnavailable();
+      // Явный выбор из этого семейства сбрасываем, иначе смена уровня
+      // ни на что не повлияет: ни выбор рецепта, ни выбор здания в строке.
+      const byId = {};
+      for (const o of this.allOptions) byId[o.recipe_id] = o;
+      const fam = this.families.find(f => f.family === family);
+      const names = new Set((fam ? fam.tiers : []).map(t => t.building));
+      for (const [key, v] of Object.entries(this.choice)) {
+        if (key.startsWith('b:')) { if (names.has(v)) delete this.choice[key]; continue; }
+        if (byId[v] && byId[v].family === family) delete this.choice[key];
+      }
+      this.save();
+    },
+    get allOptions() {
+      const out = [];
+      for (const n of this.needs) {
+        out.push(...n.options);
+        for (const nd of (n.tree || [])) out.push(...nd.options);
+      }
+      return out;
+    },
+
+    // ── построение строки ───────────────────────────────────────────
+    makeRow({ key, item, item_display, options, qty, level = 0, need = null, parentDisplay = '' }) {
+      const opt = this.chosenOption(key, options);
+      const row = { key, item, item_display, options, qty, level, need, parentDisplay,
+                    opt, machines: 0, built: 0, workers: 0, power: 0, computing: 0,
+                    inputs: [], byproducts: [], maintenance: [] };
+      if (!opt) return row;
+      if (opt.dumping) {
+        row.byproducts = [{ item: null, item_display: '{{ t('population.waste_pollution') }}', qty: null }];
+        return row;
+      }
+      if (!opt.rate) return row;
+
+      row.machines = qty / opt.rate;
+      row.built    = Math.ceil(row.machines - 1e-9);
+      // Рабочие и запчасти привязаны к самому зданию, поэтому считаются по
+      // целому числу. А энергия и вычисления тратятся только пока станок
+      // работает, поэтому берутся от дробной загрузки.
+      row.workers  = row.machines * opt.workers;
+      // electricity_kw: плюс — потребление, минус — генерация.
+      row.power     = row.machines * Math.max(0, opt.electricity_kw);
+      // computing_tf: минус — потребление, плюс — генерация.
+      row.computing = row.machines * Math.max(0, -opt.computing_tf);
+      row.inputs   = opt.inputs.filter(i => i.item !== item)
+                               .map(i => ({ ...i, qty: i.qty_per_min * row.machines }));
+      row.byproducts = opt.outputs.filter(o => o.item !== item)
+                                  .map(o => ({ ...o, qty: o.qty_per_min * row.machines }));
+      row.maintenance = opt.maintenance.map(m => ({ ...m, qty: m.rate_per_min * row.built }));
+      return row;
+    },
+
+    // Доли питания. Каждая из четырёх групп закрывает четверть потребности,
+    // продукты внутри группы делят её поровну. Норма в qty_per_10k задана для
+    // полного состава, поэтому «полная» норма продукта (когда он один на всю
+    // четверть) = qty_per_10k * число продуктов в группе. Выпавшие доли
+    // расходятся: сначала внутри группы, а если группа пуста — между группами.
+    get foodShares() {
+      const groups = {};
+      for (const n of this.needs) {
+        if (!n.food_group) continue;
+        (groups[n.food_group] = groups[n.food_group] || []).push(n);
+      }
+      const live = Object.values(groups)
+        .map(items => items.filter(n => this.isActive(n)))
+        .filter(items => items.length);
+      const out = {};
+      if (!live.length) return out;
+      for (const items of live) {
+        for (const n of items) {
+          const full  = n.qty_per_10k * n.group_size;
+          const share = (1 / live.length) / items.length;
+          out[n.id] = { qty10k: full * share * 4, share };
+        }
+      }
+      return out;
+    },
+
+    baseQty(n) {
+      if (n.food_group) {
+        const sh = this.foodShares[n.id];
+        return sh ? sh.qty10k * this.population / 10000 : 0;
+      }
+      return n.qty_per_10k * this.population / 10000;
+    },
+
+    foodShare(n) {
+      const sh = this.foodShares[n.id];
+      return sh ? sh.share : 0;
+    },
+
+    // Потребность разворачивается в дерево: сама позиция плюс её
+    // производственные узлы (компоненты медикаментов, охлаждённая вода).
+    expandNeed(n) {
+      const head = this.makeRow({
+        key: 'n' + n.id, item: n.item, item_display: this.needName(n),
+        options: n.options, qty: this.baseQty(n), need: n,
+      });
+      return [head, ...this.expandFrom(head, n)];
+    },
+
+    // Разворот от уже посчитанной головной строки: нужен и для потребностей,
+    // и для общих ресурсов, у которых объём считается по всем потребителям.
+    expandFrom(head, n) {
+      const rows = [];
+      const byItem = { [n.item]: head };
+      for (const node of (n.tree || [])) {
+        const parent = byItem[node.parent];
+        if (!parent || !parent.opt) continue;
+        const link = parent.opt.inputs.find(i => i.item === node.item);
+        if (!link) continue;
+        const row = this.makeRow({
+          key: 'n' + n.id + ':' + node.item,
+          item: node.item, item_display: node.item_display,
+          options: node.options, qty: link.qty_per_min * parent.machines,
+          level: parent.level + 1, parentDisplay: parent.item_display,
+        });
+        byItem[node.item] = row;
+        rows.push(row);
+      }
+      // Части цепочки, показанные отдельными строками, из сырья убираем:
+      // иначе медикаменты II числились бы и продуктом, и сырьём.
+      const inTree = new Set(rows.map(r => r.item));
+      for (const r of [head, ...rows]) r.inputs = r.inputs.filter(i => !inTree.has(i.item));
+      return rows;
+    },
+
+    // ── общий ресурс: сколько его тратит и производит строка ────────
+    useOf(r, item) {
+      if (!r.opt) return 0;
+      // От дробной загрузки: неполностью загруженный станок и ест меньше.
+      // Кроме полей и птицефабрик — там загрузка своя, см. fullLoad.
+      const m = r.load !== undefined ? r.load : r.machines;
+      if (item === 'Electricity') return m * Math.max(0, r.opt.electricity_kw);
+      if (item === 'Computing')   return m * Math.max(0, -r.opt.computing_tf);
+      const f = r.opt.inputs.find(i => i.item === item);
+      return f ? f.qty_per_min * m : 0;
+    },
+    givesOf(r, item) {
+      if (!r.opt) return 0;
+      if (item === 'Electricity') return r.machines * Math.max(0, -r.opt.electricity_kw);
+      if (item === 'Computing')   return r.machines * Math.max(0, r.opt.computing_tf);
+      const f = r.opt.outputs.find(i => i.item === item);
+      return f ? f.qty_per_min * r.machines : 0;
+    },
+
+    // Потребность в общем ресурсе складывается из населения и всех
+    // производств, а возврат (например, вода с очистных) вычитается.
+    sharedRow(item, consumers) {
+      const need = this.needs.find(n => n.item === item);
+      if (!need) return null;
+      const parts = [];
+      let gross = 0, returned = 0;
+
+      if (this.isActive(need)) {
+        const q = this.baseQty(need);
+        if (q) { parts.push({ label: '{{ t('population.from_population') }}', qty: q }); gross += q; }
+      }
+      // Перечислять каждое здание бессмысленно — строк выходят десятки.
+      // Расход сводим по категориям, а поимённо показываем только то,
+      // что ресурс возвращает.
+      const buckets = {};
+      for (const r of consumers) {
+        const q = this.useOf(r, item);
+        if (q <= 0.0001) continue;
+        const k = r.cat || 'utility';
+        buckets[k] = (buckets[k] || 0) + q;
+        gross += q;
+      }
+      for (const k of ['food', 'health', 'goods', 'utility', 'fertilizer']) {
+        if (buckets[k]) parts.push({ label: this.catNames[k], qty: buckets[k] });
+      }
+      for (const r of consumers) {
+        const q = this.givesOf(r, item);
+        if (q > 0.0001) { parts.push({ label: r.item_display, qty: -q, ret: true }); returned += q; }
+      }
+
+      const net = Math.max(0, gross - returned);
+      const row = this.makeRow({
+        key: 'n' + need.id, item: need.item, item_display: this.needName(need),
+        options: need.options, qty: net, need,
+      });
+      return { ...row, cat: 'utility', off: !this.isActive(need), parts, gross, returned };
+    },
+
+    // ── БАЛАНСИРОВЩИК ПИЩЕВОЙ ЦЕПОЧКИ ───────────────────────────────
+    //
+    // Еда — не дерево, а граф: соя идёт и в масло, и в тофу, корм приходит
+    // из девяти источников, а птицеферма выдаёт сразу яйца и тушки. Поэтому
+    // обходим предметы в топологическом порядке (сначала потребители),
+    // накапливая по каждому потребность и зачёт от побочных выходов.
+    // Граф ациклический, так что хватает одного прохода.
+
+    // Кто потребляет предмет внутри цепочки.
+    get chainConsumers() {
+      const out = {};
+      for (const [item, c] of Object.entries(this.chain)) {
+        for (const o of c.options) {
+          if (!o.is_primary) continue;
+          for (const i of o.inputs) {
+            if (!this.chain[i.item]) continue;
+            (out[i.item] = out[i.item] || new Set()).add(item);
+          }
+        }
+      }
+      return out;
+    },
+
+    // Предметы, которые выходят из одного рецепта и оба обязаны быть
+    // покрыты: у вторичного нет других источников (яйца и тушки).
+    get chainGroups() {
+      const groups = {};
+      for (const [item, c] of Object.entries(this.chain)) {
+        for (const o of c.options) {
+          if (!o.is_primary) continue;
+          for (const out of o.outputs) {
+            if (out.item === item || !this.chain[out.item]) continue;
+            const others = this.chain[out.item].options.filter(x => x.is_primary);
+            if (others.length) continue;   // есть свой рецепт — обычный зачёт
+            const key = [item, out.item].sort().join('|');
+            groups[item] = key;
+            groups[out.item] = key;
+          }
+        }
+      }
+      return groups;
+    },
+
+    // Порядок обхода: предмет обрабатывается после всех своих потребителей.
+    chainOrder() {
+      const cons = this.chainConsumers, groups = this.chainGroups;
+      const pending = new Set(Object.keys(this.chain));
+      const done = new Set(), order = [];
+      let guard = pending.size * pending.size + 10;
+      while (pending.size && guard-- > 0) {
+        let moved = false;
+        for (const item of [...pending]) {
+          // Список — снимок: напарник по группе мог уйти на этой же итерации.
+          if (!pending.has(item)) continue;
+          const waiting = [...(cons[item] || [])].some(c => pending.has(c));
+          if (waiting) continue;
+          // Пара из одного рецепта считается разом: обе потребности
+          // должны быть окончательными.
+          const g = groups[item];
+          if (g) {
+            const mates = Object.keys(groups).filter(k => groups[k] === g);
+            if (mates.some(m => pending.has(m) &&
+                  [...(cons[m] || [])].some(c => pending.has(c)))) continue;
+            for (const m of mates) { pending.delete(m); done.add(m); }
+            order.push(mates);
+          } else {
+            pending.delete(item); done.add(item);
+            order.push([item]);
+          }
+          moved = true;
+        }
+        if (!moved) break;   // страховка от зацикливания
+      }
+      for (const item of pending) order.push([item]);   // остаток, если что
+      return order;
+    },
+
+    // ── ЦЕНА ВАРИАНТА В ЗЕМЛЕ ────────────────────────────────────────
+    //
+    // Сколько машин поля уходит на единицу продукта. Считается вглубь: у
+    // закуски это её культура плюс масло, у масла — рапс или соя. По этой
+    // цене и выстраивается очередь в развилке, руками её задавать не нужно.
+    _cost(key, calc) {
+      const sig = this.farm + '|' + this.fertilizer + '|'
+                + Object.keys(this.tiers).sort().map(k => k + this.tiers[k]).join(',');
+      if (costCache.sig !== sig) { costCache.sig = sig; costCache.map = {}; }
+      if (key in costCache.map) return costCache.map[key];
+      costCache.map[key] = Infinity;          // страховка от цикла в графе
+      return (costCache.map[key] = calc());
+    },
+    // Машин поля на единицу культуры. Не культура — null.
+    cropCost(item) {
+      const c = this.chain[item];
+      if (!c || !c.is_crop) return null;
+      return this._cost('crop|' + item, () => {
+        const o = this.pickVariant(c.options.filter(x => x.is_primary), item);
+        return o && o.rate ? 1 / o.rate : Infinity;
+      });
+    },
+    landCost(item, kind) {
+      return this._cost('kind|' + item + '|' + kind, () => {
+        const o = this.kindOption(item, kind);
+        if (!o || !o.rate) return Infinity;
+        let cost = 0;
+        for (const i of o.inputs) {
+          const per = i.qty_per_min / o.rate;
+          const cc = this.cropCost(i.item);
+          if (cc !== null) { cost += per * cc; continue; }
+          if (this.chain[i.item]) cost += per * this.bestCost(i.item);
+        }
+        return cost;
+      });
+    },
+    // Самый дешёвый способ получить предмет — по нему оцениваются вложенные
+    // развилки: закуске всё равно, из чего сделано масло, важна его цена.
+    bestCost(item) {
+      const c = this.chain[item];
+      if (!c) return 0;
+      const cc = this.cropCost(item);
+      if (cc !== null) return cc;
+      return this._cost('best|' + item, () => {
+        let best = Infinity;
+        for (const k of this.kindsOf(item)) best = Math.min(best, this.landCost(item, k));
+        if (isFinite(best)) return best;
+        // Своего рецепта нет — предмет выходит побочно, как тушка с
+        // птицефабрики. Растить его отдельно нельзя, поэтому на него
+        // относим вход рецепта целиком: 15,1 корма даёт 10 тушек, и та же
+        // подача даёт 7,32 яйца. Каждый выход считается сам по себе.
+        for (const c of Object.values(this.chain)) {
+          for (const o of c.options) {
+            if (!o.is_primary) continue;
+            const f = o.outputs.find(x => x.item === item);
+            if (!f || !f.qty_per_min) continue;
+            let cost = 0;
+            for (const i of o.inputs) {
+              const per = i.qty_per_min / f.qty_per_min;
+              const cr = this.cropCost(i.item);
+              if (cr !== null) { cost += per * cr; continue; }
+              if (this.chain[i.item]) cost += per * this.bestCost(i.item);
+            }
+            best = Math.min(best, cost);
+          }
+        }
+        return isFinite(best) ? best : 0;
+      });
+    },
+    // Все роды рецептов предмета, от дешёвого к дорогому.
+    kindsOf(item) {
+      const c = this.chain[item];
+      if (!c) return [];
+      const out = [];
+      for (const o of c.options) {
+        if (o.is_primary && !out.includes(o.kind)) out.push(o.kind);
+      }
+      return out.sort((a, b) => this.landCost(item, a) - this.landCost(item, b));
+    },
+
+    // Выбранные роды рецептов. Порядок задаёт не пользователь, а земля:
+    // дорогие рецепты только подбирают излишки, а самый дешёвый стоит
+    // последним и закрывает остаток — под него культура и растёт.
+    kindsFor(item) {
+      const c = this.chain[item];
+      const avail = c.options.filter(o => o.is_primary);
+      // У культур развилки по сырью нет: рецепт задаётся фермой и удобрением
+      // слева. Группировать их по «роду» нельзя — родом там оказалось бы
+      // удобрение, и выбор фермы перестал бы совпадать.
+      if (c.is_crop) return avail.length ? [avail] : [];
+      const byKind = {};
+      for (const o of avail) (byKind[o.kind] = byKind[o.kind] || []).push(o);
+      const all = this.kindsOf(item);
+      const saved = this.chainChoice[item];
+      let pick = (saved && saved.length) ? saved.filter(k => byKind[k]) : [];
+      if (!pick.length) {
+        // По умолчанию — отмеченные в данных, иначе самый дешёвый.
+        pick = all.filter(k => byKind[k].some(o => o.preferred));
+        if (!pick.length) pick = all.slice(0, 1);
+      }
+      pick.sort((a, b) => this.landCost(item, b) - this.landCost(item, a));
+      return pick.map(k => byKind[k]);
+    },
+
+    // ── РАЗВИЛКА: несколько рецептов по сырью в очереди ──────────────
+    //
+    // Корм получается из девяти культур, снэки из двух, масло из двух.
+    // Выбранные рецепты образуют очередь: каждый, кроме последнего, берёт
+    // только излишки своего сырья, а последний закрывает остаток — под него
+    // и считается, сколько дорастить.
+
+    // Все роды рецептов предмета, от дешёвого к дорогому.
+    forkKinds(r) {
+      const c = this.chain[r.item];
+      if (r.cat !== 'food' || r.off || !c || c.is_crop) return [];
+      return this.kindsOf(r.item);
+    },
+    // Что отмечено сейчас — по нему подписана кнопка.
+    forkOn(item) {
+      const on = this.kindsFor(item).map(list => list[0].kind);
+      return this.kindsOf(item).filter(k => on.includes(k));
+    },
+    forkLabel(r) {
+      return this.forkOn(r.item).map(k => this.kindTitle(r.item, k)).join(', ');
+    },
+    // Представитель рода: по нему берутся название сырья, здание и темп.
+    kindOption(item, kind) {
+      const list = this.chain[item].options.filter(o => o.is_primary && o.kind === kind);
+      return this.pickVariant(list, item) || list[0] || null;
+    },
+    // Выбирают по тому, чем рецепты отличаются. У лёгкой закуски масло,
+    // пластмасса и соль есть в обоих вариантах, разница только в культуре —
+    // общее из подписи убираем.
+    kindTitle(item, kind) {
+      const o = this.kindOption(item, kind);
+      if (!o) return kind;
+      const names = opt => (opt.inputs || []).map(i => i.item_display);
+      const kinds = [];
+      for (const x of this.chain[item].options) {
+        if (x.is_primary && !kinds.includes(x.kind)) kinds.push(x.kind);
+      }
+      const others = kinds.filter(k => k !== kind).map(k => this.kindOption(item, k))
+                          .filter(Boolean).map(names);
+      if (others.length) {
+        const rest = names(o).filter(n => !others.every(list => list.includes(n)));
+        if (rest.length) return rest.join(', ');
+      }
+      return o.kind_display && o.kind_display !== '—' ? o.kind_display : o.building_display;
+    },
+    kindSub(item, kind) {
+      const o = this.kindOption(item, kind);
+      if (!o) return '';
+      return o.building_display + ' · ' + this.fmt(o.rate, 1) + ' ' + this.unitLabel('per_min');
+    },
+
+    togglePicker(r) {
+      const same = this.picker && this.picker.item === r.item;
+      this.closePicker();        // открытая соседняя развилка применяется
+      if (same) return;
+      this.picker = { item: r.item, on: this.forkOn(r.item) };
+    },
+    // Клик мимо закрывает только свою развилку: обработчик висит на каждой
+    // строке, и соседи гасили бы окно сразу после открытия.
+    closePickerFor(r) {
+      if (this.picker && this.picker.item === r.item) this.closePicker();
+    },
+    // Настройка применяется при закрытии — кликом мимо или кнопкой.
+    closePicker() {
+      if (!this.picker) return;
+      const p = this.picker;
+      this.picker = null;
+      if (p.on.length) { this.chainChoice[p.item] = [...p.on]; this.save(); }
+    },
+    pickerToggle(kind) {
+      const p = this.picker;
+      if (!p) return;
+      if (p.on.includes(kind)) {
+        if (p.on.length < 2) return;   // совсем без рецепта предмет не сделать
+        p.on = p.on.filter(k => k !== kind);
+      } else {
+        p.on = [...p.on, kind];
+      }
+    },
+    // Самый дешёвый по земле среди отмеченных — он и растёт под остаток,
+    // остальные только подбирают излишки. Смотрим на черновик, а не на
+    // сохранённый выбор: окно должно откликаться на галочки сразу.
+    pickerMain() {
+      const p = this.picker;
+      if (!p || !p.on.length) return null;
+      return this.kindsOf(p.item).filter(k => p.on.includes(k))[0];
+    },
+
+    // Излишек этой культуры девать некуда, кроме горелки.
+    deadEnd(item) {
+      const d = this.disposal[item] || [];
+      return !d.length || d.every(o => o.disposal === 'burn');
+    },
+
+    // Особый протокол для тупиковых культур. Рапс девать некуда: что не
+    // съело масло, то сгорит. Поэтому, если в развилке отмечен ещё и второй
+    // рецепт, рапса сажаем строго не больше нормы — а сколько не хватит,
+    // столько добавляем в потребность заменителю. Его излишек хотя бы уйдёт
+    // в корм или в газ. Связка передаётся упаковщику: он сам решает, где
+    // остановиться с рапсом, зная цену замены.
+    forkLinks() {
+      const out = [];
+      const cropRate = (it) => {
+        const c = this.chain[it];
+        const o = c && this.pickVariant(c.options.filter(x => x.is_primary), it);
+        return o ? o.rate : 0;
+      };
+      for (const [item, c] of Object.entries(this.chain)) {
+        if (c.is_crop) continue;
+        const kinds = this.kindsFor(item);
+        if (kinds.length < 2) continue;
+        const cheap = this.pickVariant(kinds[kinds.length - 1], item);
+        const next  = this.pickVariant(kinds[kinds.length - 2], item);
+        if (!cheap || !next || !cheap.rate || !next.rate) continue;
+        const dc = cheap.inputs.find(i => (this.chain[i.item] || {}).is_crop
+                                       && this.deadEnd(i.item));
+        const sc = next.inputs.find(i => (this.chain[i.item] || {}).is_crop);
+        if (!dc || !sc || this.deadEnd(sc.item)) continue;
+        const perDead = (dc.qty_per_min / cheap.rate) / (cropRate(dc.item) || 1);
+        const perSub  = (sc.qty_per_min / next.rate)  / (cropRate(sc.item) || 1);
+        if (!perDead || !perSub) continue;
+        // Сколько плантаций заменителя нужно вместо одной недосаженной
+        // плантации тупиковой культуры.
+        out.push({ dead: dc.item, sub: sc.item, k: perSub / perDead });
+      }
+      return out;
+    },
+    // Сколько тупиковой культуры реально разложилось по полям.
+    capsOf(lay) {
+      const caps = {};
+      for (const L of this.forkLinks()) {
+        const c = (lay.cover || []).find(x => x.item === L.dead);
+        if (c) caps[L.dead] = c.got * c.rate;
+      }
+      return caps;
+    },
+
+    // Поле поливают и удобряют весь цикл, даже если урожай девать некуда,
+    // а куры едят и пьют независимо от того, забирают ли яйца. Поэтому у
+    // них расход считается от фактической постройки, а не от загрузки.
+    fullLoad(opt) {
+      return !!(opt && (opt.farm || opt.building === 'Chicken Farm'));
+    },
+
+    // Из вариантов одного рода выбираем подходящий по ферме, удобрению
+    // и уровню здания — ровно теми же правилами, что и в остальных строках.
+    pickVariant(list, item) {
+      if (!list || !list.length) return null;
+      const farmed = list.filter(o => o.farm);
+      if (farmed.length) {
+        return farmed.find(o => o.farm === this.farm
+                             && o.fertilizer === this.fertilizer) || null;
+      }
+      // Здание могли выбрать в строке — тогда оно главнее уровня семейства.
+      const want = item ? this.choice['b:chain:' + item] : null;
+      if (want) {
+        const hit = list.filter(o => o.building === want);
+        if (hit.length) return hit[0];
+      }
+      const fit = list.filter(o => this.tierOk(o));
+      return (fit.length ? fit : list)[0];
+    },
+
+    // Один проход балансировщика. seed — излишек культур, который поля выдают
+    // сверх потребности: он появляется от округления числа полей и достаётся
+    // дорогим рецептам развилки даром.
+    runFoodChain(medicineRows, seed, caps, packQty, packSplit) {
+      const demand = {}, credit = {}, made = {}, rows = [], warn = [], surplus = {};
+      // Излишек полей лежит отдельно от зачёта побочных выходов: обычный
+      // расход его не трогает — он уже вырос и уже посчитан в потребности
+      // первого прохода. Забрать его может только подбирающий рецепт развилки.
+      const spare = { ...(seed || {}) }, usedSpare = {};
+      const add = (bag, k, v) => { bag[k] = (bag[k] || 0) + v; };
+      // Откуда взялась потребность в каждом предмете: население, медикаменты
+      // и каждый рецепт-потребитель отдельной строкой. Без этого непонятно,
+      // почему кукурузы нужно 57,5, если население просит 25.
+      const sources = {};
+      const addSrc = (item, label, qty, ret) => {
+        if (Math.abs(qty) < 1e-9) return;
+        const list = sources[item] = sources[item] || [];
+        const cur = list.find(x => x.label === label && !!x.ret === !!ret);
+        if (cur) cur.qty += qty; else list.push({ label, qty, ret: !!ret });
+      };
+
+      // 1. Потребности населения.
+      for (const n of this.needs) {
+        if (n.group_key !== 'food' || !this.isActive(n) || !this.chain[n.item]) continue;
+        add(demand, n.item, this.baseQty(n));
+        addSrc(n.item, '{{ t('population.from_population') }}', this.baseQty(n));
+      }
+      // 1б. Пайки: спрос задаётся вручную, потребности населения у них нет.
+      const packs = packQty !== undefined ? packQty : this.packNeed;
+      if (packs > 1e-9 && this.chain['Food Pack']) {
+        add(demand, 'Food Pack', packs);
+        addSrc('Food Pack', '{{ t('population.packs') }}', packs);
+      }
+      // 2. Мак и сахар нужны медикаментам — их спрос приходит извне цепочки.
+      for (const r of (medicineRows || [])) {
+        for (const i of (r.inputs || [])) {
+          if (!this.chain[i.item]) continue;
+          add(demand, i.item, i.qty);
+          addSrc(i.item, '{{ t('population.from_medicine') }}', i.qty);
+        }
+      }
+
+      const groups = this.chainGroups;
+      for (const batch of this.chainOrder()) {
+        // Размер рецепта задаёт основной выход, но если из него же выходит
+        // предмет, который больше взять негде, считаем по максимуму.
+        const need = {};
+        for (const it of batch) need[it] = Math.max(0, (demand[it] || 0) - (credit[it] || 0));
+        for (const it of batch) surplus[it] = Math.max(0, (credit[it] || 0) - (demand[it] || 0));
+        if (batch.every(it => need[it] <= 1e-9)) continue;
+
+        // Ведущим может быть только предмет со своим рецептом: у тушки его
+        // нет, она выходит с птицефермы вместе с яйцами. Размер всё равно
+        // считается по максимуму из пары ниже, а кто в лесенке окажется
+        // «главным», решает порядок обхода: пока нужно мясо, тушка попадает
+        // под него первой; если мясо и сосиски выключить, первым корнем
+        // станут яйца.
+        const lead = batch.find(it => need[it] > 1e-9 && this.kindsFor(it).length)
+                  || batch.find(it => need[it] > 1e-9);
+        if (!lead) continue;
+
+        let kinds = this.kindsFor(lead);
+        if (!kinds.length) continue;
+
+        // Остаток закрывает последний в очереди. Если это тупиковая культура,
+        // порядок переворачивается: она идёт первой и ограничена тем, что
+        // реально разложилось по полям, а нехватку добирает следующий рецепт.
+        // Пока полей ещё нет (первый проход), считаем по ней одной — так
+        // получается норма, от которой упаковщик и будет отталкиваться.
+        const lastOpt = this.pickVariant(kinds[kinds.length - 1], lead);
+        const deadIn = kinds.length > 1 && lastOpt
+          ? lastOpt.inputs.find(i => (this.chain[i.item] || {}).is_crop
+                                  && this.deadEnd(i.item))
+          : null;
+        let capped = null;
+        if (deadIn) {
+          if (caps && caps[deadIn.item] != null) {
+            kinds = [kinds[kinds.length - 1], ...kinds.slice(0, -1)];
+            capped = { item: deadIn.item, units: caps[deadIn.item], qty: deadIn.qty_per_min };
+          } else {
+            kinds = [kinds[kinds.length - 1]];
+          }
+        }
+
+        let left = need[lead];
+        kinds.forEach((list, idx) => {
+          const opt = this.pickVariant(list, lead);
+          if (!opt || !opt.rate || left <= 1e-9) return;
+          const last = idx === kinds.length - 1;
+
+          // Рецепты до последнего берут только излишек своего сырья;
+          // последний закрывает остаток и определяет, сколько дорастить.
+          const availOf = (it) => (surplus[it] || 0) + (spare[it] || 0);
+          let take = left;
+          if (packSplit && lead === 'Food Pack') {
+            // Разбивка посчитана заранее: сколько пайков выйдет из уже
+            // имеющихся излишков и сколько дадут новые птицефабрики.
+            take = Math.min(left, packSplit[opt.kind] || 0);
+            if (take <= 1e-9) return;
+          } else if (capped && idx === 0) {
+            // Тупиковая культура: берём ровно столько, сколько посажено.
+            take = Math.min(left, capped.units * opt.rate / capped.qty);
+            if (take <= 1e-9) return;
+          } else if (!last) {
+            // Ингредиентов может быть несколько: у пайка это яйца и хлеб.
+            // Излишек одного ничего не даёт, если второго нет, поэтому
+            // потолок — минимум по всем ингредиентам цепочки.
+            let cap = Infinity;
+            for (const i of opt.inputs) {
+              if (!this.chain[i.item] || !i.qty_per_min) continue;
+              cap = Math.min(cap, availOf(i.item) * opt.rate / i.qty_per_min);
+            }
+            take = isFinite(cap) ? Math.min(left, cap) : 0;
+            if (take <= 1e-9) return;
+          }
+
+          let scale = take / opt.rate;
+          // Парный выход: масштаб берём по тому, кого нужно больше.
+          for (const it of batch) {
+            if (it === lead) continue;
+            const f = opt.outputs.find(o => o.item === it);
+            if (f && f.qty_per_min) scale = Math.max(scale, need[it] / f.qty_per_min);
+          }
+          // Птицефабрика работает целыми постройками: куры и едят, и несутся
+          // независимо от того, забирают ли выход. Поэтому и выпуск считаем
+          // по округлённому числу — лишние яйца и тушки станут излишком.
+          if (opt.building === 'Chicken Farm') scale = Math.ceil(scale - 1e-9);
+
+          // Подбирает остатки только тот рецепт, чей объём ограничен
+          // доступным излишком. Ни последний в очереди, ни тупиковая
+          // культура под верхней границей остатками не считаются — их
+          // выращивают намеренно.
+          const fromSpare = !(last || (capped && idx === 0));
+          const row = this.chainRow(lead, opt, scale, batch, fromSpare);
+          rows.push(row);
+          left -= scale * opt.rate;
+          add(made, lead, scale * opt.rate);
+
+          for (const i of opt.inputs) {
+            const q = i.qty_per_min * scale;
+            // Подбирающий рецепт ест именно излишек полей. Он уже вырос,
+            // поэтому новой потребности не создаёт — вычитаем его из q.
+            let fromSpare = 0;
+            if (!last && spare[i.item] > 0) {
+              fromSpare = Math.min(spare[i.item], q);
+              spare[i.item] -= fromSpare;
+              usedSpare[i.item] = (usedSpare[i.item] || 0) + fromSpare;
+            }
+            add(demand, i.item, q - fromSpare);
+            // Подписываем потребителем: для кукурузы это «лёгкая закуска».
+            // У парного рецепта ведущим предметом оказались бы яйца, хотя
+            // корм ест птицефабрика целиком, — поэтому там подписываем зданием.
+            addSrc(i.item,
+                   batch.length > 1 ? opt.building_display : this.chain[lead].item_display,
+                   q);
+            if (this.chain[i.item] && surplus[i.item] > 0) {
+              surplus[i.item] = Math.max(0, surplus[i.item] - (q - fromSpare));
+            }
+          }
+          for (const o of opt.outputs) {
+            if (o.item === lead) continue;
+            add(credit, o.item, o.qty_per_min * scale);
+            add(made, o.item, o.qty_per_min * scale);
+            // Побочный выход уменьшает то, что придётся делать отдельно.
+            if (this.chain[o.item]) {
+              addSrc(o.item,
+                     batch.length > 1 ? opt.building_display : this.chain[lead].item_display,
+                     -o.qty_per_min * scale, true);
+            }
+          }
+        });
+      }
+
+      // Остатки считаем по факту: сколько сделали минус сколько ушло.
+      // Побочный выход попадает и в made, и в credit, поэтому берём made.
+      for (const it of Object.keys(this.chain)) {
+        const s = (made[it] || 0) - (demand[it] || 0);
+        surplus[it] = s > 1e-6 ? s : 0;
+      }
+      // Предупреждения кладём прямо в строку: обращаться к плану во время
+      // его же вычисления нельзя, геттер уйдёт в рекурсию.
+      for (const r of rows) {
+        r.warn = warn.filter(w => w.item === r.item).map(w => w.text);
+        r.parts = (sources[r.item] || []).slice()
+          .sort((a, b) => Math.abs(b.qty) - Math.abs(a.qty));
+        r.surplus = surplus[r.item] || 0;
+      }
+      // Три блока: что ест население, что делается по дороге и что растёт.
+      const needItems = new Set(this.needs.filter(n => n.group_key === 'food').map(n => n.item));
+      // API отдаёт потребности уже в нужном порядке, sort_order в ответе нет,
+      // поэтому берём позицию в списке.
+      const orderOf = {};
+      this.needs.forEach((n, i) => { if (n.group_key === 'food') orderOf[n.item] = i; });
+      for (const r of rows) {
+        r.block = r.isCrop ? 'crops' : (needItems.has(r.item) ? 'population' : 'intermediate');
+        r.blockOrder = r.block === 'population' ? 0 : r.block === 'intermediate' ? 1 : 2;
+        // Порядок потребления задаёт список потребностей, остальные блоки
+        // сортируются по алфавиту.
+        r.sortKey = r.block === 'population' && orderOf[r.item] !== undefined
+                      ? orderOf[r.item] : 0;
+        // Группы питания размечают только блок потребления: картофель растёт
+        // и там, и там, но разделитель нужен лишь наверху.
+        r.foodGroup = r.block === 'population'
+                      ? ((this.needs.find(n => n.item === r.item) || {}).food_group || null)
+                      : null;
+      }
+      rows.sort((a, b) => a.blockOrder - b.blockOrder
+                       || a.sortKey - b.sortKey
+                       || a.item_display.localeCompare(b.item_display));
+      return { rows, demand, credit, made, surplus, warn, sources, usedSpare };
+    },
+
+    // Саженцы растут на тех же фермах и так же занимают слоты. Дерево даёт
+    // двадцать древесины, поэтому потребность в саженцах — это потребность
+    // в древесине, делённая на двадцать.
+    WOOD_PER_TREE: 20,
+    get saplingNeed() {
+      return this.woodNeed > 0 ? this.woodNeed / this.WOOD_PER_TREE : 0;
+    },
+    get saplingOpt() {
+      return this.sapling ? this.chosenOption('sapling', this.sapling.options) : null;
+    },
+
+    // Потребность в культурах, как её видит упаковщик полей.
+    cropNeeds(fp) {
+      const by = {};
+      for (const r of fp.rows) {
+        if (!r.isCrop || !r.opt || !r.opt.cycle_time_s) continue;
+        const b = by[r.item] || (by[r.item] = {
+          item: r.item, display: r.item_display,
+          cycle: r.opt.cycle_time_s, rate: r.opt.rate, need: 0 });
+        b.need += r.machines;
+      }
+      const o = this.saplingOpt;
+      if (this.saplingNeed > 1e-9 && o && o.rate && o.cycle_time_s) {
+        by['Tree Sapling'] = {
+          item: 'Tree Sapling', display: this.sapling.item_display,
+          cycle: o.cycle_time_s, rate: o.rate, need: this.saplingNeed / o.rate };
+      }
+      return Object.values(by);
+    },
+
+    // Пайки не влезают в общее правило «дорогой рецепт подбирает излишек»:
+    // они стоят первыми в топологическом порядке, и в этот момент мяса ещё
+    // нет — оно появится ниже по цепочке. Поэтому разбивку считаем заранее.
+    //
+    // Сначала смотрим, сколько пайков выйдет из яиц и мяса, которые и так
+    // остаются от нынешних птицефабрик. Остаток закрываем новыми фабриками,
+    // а они дают яйца и тушки разом — значит и делить его надо в той же
+    // пропорции, в какой ферма их выдаёт.
+    packSplitFor(medicineRows, seed, caps) {
+      const P = this.packNeed;
+      if (!(P > 1e-9) || !this.chain['Food Pack']) return null;
+      const per = (o, it) => {
+        const f = o && o.inputs.find(x => x.item === it);
+        return f && o.rate ? f.qty_per_min / o.rate : 0;
+      };
+      const opts = this.kindsFor('Food Pack')
+                       .map(l => this.pickVariant(l, 'Food Pack')).filter(Boolean);
+      const eggOpt = opts.find(o => per(o, 'Eggs') > 0);
+      const meatOpt = opts.find(o => per(o, 'Meat') > 0);
+      if (!eggOpt && !meatOpt) return null;
+
+      const base = this.runFoodChain(medicineRows, seed, caps, 0);
+      const meatChain = this.pickVariant((this.kindsFor('Meat') || [[]])[0], 'Meat');
+      const carPerMeat = per(meatChain, 'Chicken Carcass');
+      const eggsFree = base.surplus['Eggs'] || 0;
+      const meatFree = (base.surplus['Meat'] || 0)
+                     + (carPerMeat ? (base.surplus['Chicken Carcass'] || 0) / carPerMeat : 0);
+
+      const ePer = eggOpt ? per(eggOpt, 'Eggs') : 0;
+      const mPer = meatOpt ? per(meatOpt, 'Meat') : 0;
+      const split = {};
+      let left = P;
+      const give = (o, q) => {
+        if (!o || !(q > 1e-9)) return;
+        split[o.kind] = (split[o.kind] || 0) + q;
+        left -= q;
+      };
+      if (ePer > 0) give(eggOpt, Math.min(left, eggsFree / ePer));
+      if (mPer > 0) give(meatOpt, Math.min(left, meatFree / mPer));
+
+      if (left > 1e-9) {
+        const cf = this.pickVariant((this.kindsFor('Eggs') || [[]])[0], 'Eggs');
+        const out = (it) => {
+          const f = cf && cf.outputs.find(x => x.item === it);
+          return f ? f.qty_per_min : 0;
+        };
+        const fromE = ePer > 0 ? out('Eggs') / ePer : 0;
+        const fromM = (mPer > 0 && carPerMeat) ? (out('Chicken Carcass') / carPerMeat) / mPer : 0;
+        const tot = fromE + fromM;
+        if (tot > 1e-9) {
+          const rest = left;
+          give(eggOpt, rest * fromE / tot);
+          give(meatOpt, rest * fromM / tot);
+        } else {
+          give(eggOpt || meatOpt, left);
+        }
+      }
+      // Хвост от округлений отдаём самому дешёвому рецепту.
+      if (left > 1e-9) give(eggOpt || meatOpt, left);
+      return split;
+    },
+    // Один расчёт цепочки вместе с разбивкой пайков.
+    chainRun(medicineRows, seed, caps) {
+      return this.runFoodChain(medicineRows, seed, caps, undefined,
+                               this.packSplitFor(medicineRows, seed, caps));
+    },
+
+    // Полный расчёт еды. Число полей — целое, поэтому часть урожая вырастет
+    // сверх потребности в любом случае. Этот излишек не выбрасываем, а отдаём
+    // дорогим рецептам развилок: они забирают его даром, и под самый дешёвый
+    // рецепт остаётся дорастить меньше.
+    //
+    // Круга здесь нет: излишек только уменьшает потребность, поэтому раскладка
+    // первого прохода остаётся годной. Пересчитываем её один раз и только
+    // если освободилось целое поле.
+    buildFoodPlan(medicineRows) {
+      const links = this.forkLinks();
+      const first = this.chainRun(medicineRows, null, null);
+      let layout = this.packCached(this.cropNeeds(first), links);
+      let fin = first;
+
+      const seedOf = (lay) => {
+        const s = {};
+        for (const c of lay.cover) if (c.extra > 1e-9) s[c.item] = c.extra * c.rate;
+        return s;
+      };
+      // Раскладка годится, если каждой культуры в ней не меньше, чем просит
+      // расчёт. Пара «первый проход + его раскладка» годится всегда.
+      const covers = (lay, fp) => this.cropNeeds(fp).every(c => {
+        const got = (lay.cover.find(x => x.item === c.item) || {}).got || 0;
+        return got >= c.need - 1e-9;
+      });
+
+      if (layout.farms) {
+        const was = this.cropNeeds(first);
+        const fin1 = this.chainRun(medicineRows, seedOf(layout), this.capsOf(layout));
+        const needs2 = this.cropNeeds(fin1);
+        // Потребность изменилась: подбор излишков её снизил, а протокол по
+        // рапсу — наоборот, переложил часть масла на сою. Поля надо
+        // пересадить под новую, иначе рапс останется в земле в объёме
+        // первого прохода и уйдёт в горелку.
+        const changed = needs2.some(c => {
+          const w = was.find(x => x.item === c.item);
+          return !w || Math.abs(w.need - c.need) > 1e-9;
+        });
+        let done = false;
+        if (!changed) {
+          if (covers(layout, fin1)) { fin = fin1; done = true; }
+        } else {
+          let cand = this.packCached(needs2, links);
+          let cf = cand.farms
+            ? this.chainRun(medicineRows, seedOf(cand), this.capsOf(cand)) : null;
+          if (cf && !covers(cand, cf)) {
+            // Потребность подвинулась ещё раз: протокол переложил часть масла
+            // на сою, а её саму пришлось досаживать. Даём вторую попытку.
+            const c2 = this.packCached(this.cropNeeds(cf), links);
+            const f2 = c2.farms
+              ? this.chainRun(medicineRows, seedOf(c2), this.capsOf(c2)) : null;
+            if (f2 && covers(c2, f2)) { cand = c2; cf = f2; }
+          }
+          // Берём только ту раскладку, которая сама себя подтверждает.
+          if (cf && covers(cand, cf)) { layout = cand; fin = cf; done = true; }
+          else if (covers(layout, fin1)) { fin = fin1; done = true; }
+        }
+        // Ничего не сошлось. Откатываемся на пару, согласованную по
+        // построению: первый проход и раскладка без протокола. Оставить
+        // капнутую раскладку с расчётом без капа нельзя — тогда рапса
+        // расходуется больше, чем растёт.
+        if (!done) {
+          layout = links.length ? this.packCached(was) : layout;
+          fin = first;
+        }
+      }
+      // Протокол сажает тупиковую культуру меньше нормы, а нехватку
+      // закрывает заменителем. В таблице показываем честную потребность —
+      // сколько её ушло бы, делай мы всё на ней одной. Разница уходит
+      // в отрицательную дельту: это не недостача, а сознательный недосев.
+      const trueNeed = {};
+      for (const c of this.cropNeeds(first)) trueNeed[c.item] = c.need;
+      const dead = new Set(links.map(L => L.dead));
+      if (dead.size && layout.cover) {
+        layout = { ...layout, cover: layout.cover.map(c => {
+          if (!dead.has(c.item)) return c;
+          const n = trueNeed[c.item];
+          if (!(n > c.need + 1e-9)) return c;
+          return { ...c, need: n, extra: c.got - n,
+                   needQty: n * c.rate, outExtra: (c.got - n) * c.rate };
+        }) };
+        const sum = (f) => layout.cover.reduce((t, c) => t + f(c), 0);
+        layout.totals = { need: sum(c => c.need), got: sum(c => c.got),
+                          extra: sum(c => c.extra) };
+      }
+
+      // Рапс и масло девать некуда: ферментёр их не принимает, остаётся
+      // горелка. Предупреждаем только если излишек действительно остался —
+      // пугать сообщением на пустом месте ни к чему.
+      for (const c of (layout.cover || [])) {
+        if (!this.deadEnd(c.item)) continue;
+        const left = c.out - (fin.demand[c.item] || 0)
+                           - ((fin.usedSpare || {})[c.item] || 0);
+        if (left <= 1e-6) continue;
+        for (const r of fin.rows) {
+          if (r.item === c.item) r.warn = [...(r.warn || []),
+                                           '{{ t('population.canola_warning') }}'];
+        }
+      }
+
+      // Поля работают столько, сколько им отвели слотов, а не сколько
+      // просит потребность: доля слота и есть время работы. Переносим это
+      // в строки уже после упаковки, иначе следующий проход принял бы
+      // фактическую раскладку за новую потребность.
+      for (const r of fin.rows) {
+        if (!r.isCrop || !r.opt) continue;
+        const c = layout.cover.find(x => x.item === r.item);
+        if (!c) continue;
+        r.load = c.got;
+        r.workers = c.got * r.opt.workers;
+        r.power = c.got * Math.max(0, r.opt.electricity_kw);
+        r.computing = c.got * Math.max(0, -r.opt.computing_tf);
+        r.inputs = r.opt.inputs.map(i => ({ ...i, qty: i.qty_per_min * c.got }));
+      }
+
+      const built = this.buildFoodTree(fin.rows, fin.demand, fin.sources, fin.surplus, fin.made);
+      return { ...fin, layout, tree: built.tree, extra: built.extra,
+               packs: built.packs };
+    },
+
+    // Лесенка: от готового продукта вниз к культурам. Полуфабрикат
+    // расписывается при первой встрече — там же видны все его потребители,
+    // а дальше по дереву он появляется только ссылкой, чтобы не двоить числа.
+    // Несколько рецептов одного предмета сводим в один узел. Ведущим берём
+    // последний в очереди — это самый дешёвый по земле, тот, под который
+    // культура и растёт; остальные лишь подбирают излишки.
+    mergeChainRows(list) {
+      if (list.length === 1) return list[0];
+      // Ведущий — тот, кем сделано больше всего: по нему подписаны здание и
+      // рецепт. Брать «последнего в очереди» нельзя: в протоколе по рапсу
+      // очередь перевёрнута, и последней идёт соя с крошечной долей.
+      const lead = list.reduce((a, b) => (b.qty > a.qty ? b : a), list[0]);
+      const sum = f => list.reduce((s, r) => s + (f(r) || 0), 0);
+      const bag = (key, mark) => {
+        const m = {};
+        for (const r of list) {
+          for (const x of (r[key] || [])) {
+            const b = m[x.item] || (m[x.item] = { ...x, qty: 0,
+                                                  spare: !!mark, spareOnly: !!mark });
+            b.qty += x.qty;
+            // Отмечаем всё, что пришло не из основного рецепта, — по этому и
+            // красим. Отдельно помним, подобрано ли оно из остатков: разница
+            // видна в подсказке, но цвет один, иначе рябит.
+            if (mark && r === lead) b.spare = false;
+            if (mark && !r.fromSpare) b.spareOnly = false;
+          }
+        }
+        return Object.values(m).sort((a, b) => b.qty - a.qty);
+      };
+      // Рецепты перечисляются внутри одной машины и крутятся по очереди,
+      // поэтому округляем вверх уже сумму, а не каждый рецепт отдельно.
+      // По зданиям всё же разделяем: смеситель и мельница — разные машины.
+      const byB = {};
+      for (const r of list) {
+        const k = (r.opt && r.opt.building) || '';
+        byB[k] = (byB[k] || 0) + (r.machines || 0);
+      }
+      const built = Object.values(byB).reduce((t, m) => t + Math.ceil(m - 1e-9), 0);
+      return { ...lead, key: 'merge:' + lead.item, merged: true,
+               qty: sum(r => r.qty), machines: sum(r => r.machines),
+               built, workers: sum(r => r.workers),
+               power: sum(r => r.power), computing: sum(r => r.computing),
+               inputs: bag('inputs', true), byproducts: bag('byproducts'),
+               maintenance: bag('maintenance'),
+               warn: [...new Set(list.flatMap(r => r.warn || []))] };
+    },
+
+    buildFoodTree(rows, demand, sources, surplus, made) {
+      // Рецептов на предмет может быть несколько, но узел в дереве один:
+      // в лесенке важно, сколько всего и какого сырья туда придёт, а не
+      // сколько машин какого типа стоит. Машины складываются в одну строку.
+      const byItem = {};
+      const groups = {};
+      for (const r of rows) (groups[r.item] = groups[r.item] || []).push(r);
+      for (const [item, list] of Object.entries(groups)) {
+        byItem[item] = this.mergeChainRows(list);
+      }
+      for (const r of Object.values({ ...byItem })) {
+        // Парный выход ведёт к той же строке: тушка делается на птицеферме
+        // вместе с яйцами, отдельного рецепта у неё нет.
+        for (const co of (r.coItems || [])) if (!byItem[co]) byItem[co] = r;
+      }
+      const shown = new Set(), stubbed = new Set(), out = [];
+
+      const walk = (item, level, parentDisplay) => {
+        const r = byItem[item];
+        if (r) walkRow(r, item, level, parentDisplay);
+      };
+
+      // Возвращает true, если строка попала в дерево.
+      const walkRow = (r, item, level, parentDisplay) => {
+        const co = r.item !== item;           // пришли за парным выходом
+        const disp = co ? (this.chain[item] || {}).item_display || item : r.item_display;
+        const qty  = co ? (demand[item] || 0) : r.qty;
+        // У парного выхода свои потребители и свой излишек: строка на
+        // птицеферме общая, но тушки и яйца расходятся по-разному.
+        const own = co
+          ? { // Себя же в составе не показываем: на строке тушки строка
+              // «Птицефабрика −49,51» — это её собственный рецепт.
+              parts: (sources[item] || [])
+                       .filter(x => !(x.ret && r.opt && x.label === r.opt.building_display))
+                       .slice().sort((a, b) => Math.abs(b.qty) - Math.abs(a.qty)),
+              surplus: surplus[item] || 0,
+              // Побочные выходы считаем относительно показанного предмета:
+              // на строке тушки побочным должны быть яйца, а не сами тушки.
+              byproducts: (r.opt ? r.opt.outputs : [])
+                            .filter(o => o.item !== item)
+                            .map(o => ({ ...o, qty: o.qty_per_min * r.machines })),
+              need: this.needs.find(n => n.group_key === 'food' && n.item === item) || null }
+          : { parts: r.parts, surplus: r.surplus,
+              byproducts: r.byproducts, need: r.need };
+        // Повторное упоминание строкой не показываем: ингредиент и так виден
+        // в составе рецепта родителя. Исключение — продукт потребления:
+        // яйца выходят вместе с тушками, но у населения своя потребность в
+        // них и своя галочка, поэтому строка нужна.
+        if (shown.has(r.key)) {
+          const own = this.needs.find(n => n.group_key === 'food' && n.item === item);
+          if (own && level === 0 && this.isActive(own) && !stubbed.has(item)) {
+            stubbed.add(item);
+            // Рецепт стоит в другой ветке, поэтому производство добавляем
+            // возвратом: иначе непонятно, откуда взялся излишек яиц.
+            const parts = (sources[item] || []).slice();
+            const back = parts.reduce((t, x) => t + (x.ret ? Math.abs(x.qty) : 0), 0);
+            const rest = (made[item] || 0) - back;
+            if (rest > 1e-6 && r.opt) {
+              parts.push({ label: r.opt.building_display, qty: -rest, ret: true });
+            }
+            parts.sort((a, b) => Math.abs(b.qty) - Math.abs(a.qty));
+            out.push({ ...r, item, item_display: (this.chain[item] || {}).item_display || item,
+                       qty: demand[item] || 0, need: own, parts,
+                       surplus: surplus[item] || 0,
+                       inputs: [], byproducts: [], maintenance: [],
+                       opt: null, machines: 0, built: 0, workers: 0, power: 0, computing: 0,
+                       key: 'need:' + item, level, parentDisplay: '',
+                       foodGroup: own.food_group });
+            return true;
+          }
+          return false;
+        }
+        shown.add(r.key);
+        const row = { ...r, item, item_display: disp, qty, ...own,
+                      key: 'row:' + item, level, ref: false, parentDisplay };
+        out.push(row);
+        if (!r.opt) return true;
+        // Ингредиент, который расписывается строкой ниже, из состава убираем:
+        // его количество и так видно в собственной строке.
+        // Идём по сырью объединённой строки, а не одного рецепта: у корма
+        // из двух культур ниже должны раскрыться обе.
+        const nested = new Set();
+        for (const i of (row.inputs || [])) {
+          const kid = byItem[i.item];
+          if (!kid || i.item === item) continue;
+          // Ингредиент, который расписывается строкой ниже, из состава
+          // убираем: там то же число. Развилке это не мешает — её культуры
+          // почти всегда показаны выше самостоятельными строками.
+          if (!shown.has(kid.key)) nested.add(i.item);
+          walk(i.item, level + 1, disp);
+        }
+        row.inputs = (row.inputs || []).filter(i => !nested.has(i.item));
+        return true;
+      };
+
+      // Корни — потребности питания в порядке, заданном игрой.
+      for (const n of this.needs) {
+        if (n.group_key !== 'food') continue;
+        if (!this.isActive(n)) {
+          // Снятый продукт из расчёта выпадает, но строка нужна: иначе
+          // галочку негде вернуть.
+          out.push({ key: 'off:' + n.item, item: n.item, item_display: this.needName(n),
+                     need: n, off: true, cat: 'food', level: 0, foodGroup: n.food_group,
+                     qty: 0, machines: 0, built: 0, workers: 0, power: 0, computing: 0,
+                     options: [], opt: null, parts: [], inputs: [], byproducts: [],
+                     maintenance: [], parentDisplay: '' });
+          continue;
+        }
+        if (byItem[n.item]) byItem[n.item].foodGroup = n.food_group;
+        walk(n.item, 0, '');
+      }
+      // Пайки идут отдельным подразделом в конце еды: у них нет своей
+      // потребности у населения, спрос задаётся руками.
+      const packMark = out.length;
+      if (this.packNeed > 1e-9 && byItem['Food Pack']) walk('Food Pack', 0, '');
+      const packs = out.splice(packMark);
+
+      // Что не попало ни под один корень — мак и тростник для лекарств.
+      // Проверяем по ключу строки: shown хранит именно их, иначе парные
+      // выходы дали бы повторный обход всего дерева. Такие ветки уходят в
+      // раздел медикаментов: в еде им не место.
+      const extra = [];
+      const mark = out.length;
+      // Сверяемся с ключом объединённой строки, а не исходной: у предмета с
+      // двумя рецептами исходные ключи в shown не попадают, и закуска уезжала
+      // в медикаменты вместе со всей своей веткой.
+      const seenExtra = new Set();
+      for (const r of rows) {
+        const m = byItem[r.item];
+        if (!m || shown.has(m.key) || seenExtra.has(r.item)) continue;
+        seenExtra.add(r.item);
+        walk(r.item, 0, '');
+      }
+      extra.push(...out.splice(mark));
+      return { tree: out, extra, packs };
+    },
+
+    chainRow(item, opt, scale, batch, fromSpare) {
+      const c = this.chain[item];
+      const built = Math.ceil(scale - 1e-9);
+      // Загрузка, от которой считается расход. У птицефабрики это целые
+      // постройки: куры едят независимо от того, забирают ли яйца. У полей
+      // её заменит фактическая раскладка — там доля слота и есть время
+      // работы, и она уже больше расчётной потребности.
+      const load = opt.building === 'Chicken Farm' ? built : scale;
+      // Продукт потребления несёт свою потребность: без неё в карточке
+      // не появляется галочка «считать».
+      const need = this.needs.find(n => n.group_key === 'food' && n.item === item) || null;
+      return {
+        key: 'c:' + item + ':' + opt.recipe_id,
+        item, item_display: c.item_display, need, cat: 'food',
+        options: c.options, opt, level: 0, parentDisplay: '',
+        qty: scale * opt.rate, machines: scale, built, load,
+        workers: load * opt.workers,
+        power: load * Math.max(0, opt.electricity_kw),
+        computing: load * Math.max(0, -opt.computing_tf),
+        inputs: opt.inputs.map(i => ({ ...i, qty: i.qty_per_min * load })),
+        byproducts: opt.outputs.filter(o => o.item !== item)
+                              .map(o => ({ ...o, qty: o.qty_per_min * scale })),
+        maintenance: opt.maintenance.map(m => ({ ...m, qty: m.rate_per_min * built })),
+        isCrop: c.is_crop, coItems: batch.filter(x => x !== item),
+        fromSpare: !!fromSpare,
+      };
+    },
+
+    // ── весь план ───────────────────────────────────────────────────
+    // Подпись входных данных. Читая их здесь, мы заодно объявляем Alpine
+    // зависимости геттера — иначе на попадании в кеш он перестал бы
+    // пересчитываться при смене настроек.
+    get planSig() {
+      return JSON.stringify([this.loading, this.needs.length, this.population,
+        this.tiers, this.farm, this.fertilizer, this.choice, this.enabled,
+        this.medicine, this.chainChoice, this.dispChoice,
+        this.woodNeed, this.packNeed]);
+    },
+    get plan() {
+      const sig = this.planSig;
+      if (planCache.sig === sig) return planCache.value;
+      const value = this.computePlan();
+      planCache.sig = sig;
+      planCache.value = value;
+      return value;
+    },
+    computePlan() {
+      const medicine = [], goods = [];
+      for (const n of this.needs) {
+        if (n.need_type !== 0 || n.shared || n.group_key === 'food') continue;
+        // Лекарства показываем только выбранного уровня; остальное — всегда,
+        // выключенное просто гасим, иначе галочку негде вернуть.
+        if (n.choice_group === 'medicine' && n.id !== this.medicine) continue;
+        const bucket = n.group_key === 'health' ? medicine : goods;
+        if (this.enabled[n.id] && this.isActive(n)) {
+          bucket.push(...this.expandNeed(n).map(r => ({
+            ...r, cat: n.group_key === 'food' ? 'food' : n.group_key })));
+        } else {
+          bucket.push({ ...this.makeRow({ key: 'n' + n.id, item: n.item,
+            item_display: this.needName(n), options: n.options, qty: 0, need: n }),
+            cat: n.group_key, off: true });
+        }
+      }
+      goods.sort((a, b) => (a.need ? a.need.id : 0) - (b.need ? b.need.id : 0));
+
+      // Еда считается балансировщиком: спрос на мак и сахар приходит от
+      // медикаментов, поэтому их строки нужны раньше.
+      const fp = this.buildFoodPlan(medicine);
+      // Заголовок подраздела вешаем на первую строку пайков.
+      const packRows = (fp.packs || []).map((r, i) =>
+        i === 0 ? { ...r, subTitle: '{{ t('population.packs') }}' } : r);
+      const food = [...fp.tree, ...packRows];
+
+      const waste = [];
+      for (const n of this.needs) {
+        if (n.need_type !== 1) continue;
+        waste.push({ ...this.makeRow({ key: 'n' + n.id, item: n.item,
+          item_display: this.needName(n), options: n.options,
+          qty: this.isActive(n) ? this.baseQty(n) : 0, need: n }),
+          cat: 'utility', off: !this.isActive(n) });
+      }
+
+      // Осадок с очистных девать некуда, кроме биореактора. Показываем это
+      // дочерним узлом переработки отходов — так же, как охлаждённую воду
+      // под вычислениями. В общий список строк они тоже входят: их энергия
+      // и рабочие должны попасть в баланс.
+      const wasteDisposal = [];
+      for (const w of waste) {
+        if (w.off) continue;
+        for (const o of (w.byproducts || [])) {
+          if (!o.item || !(o.qty > 1e-6)) continue;
+          const opt = this.disposalOpt(o.item);
+          if (!opt || !opt.rate) continue;
+          const row = this.disposalRow(o, opt);
+          wasteDisposal.push(row);
+          w.chain = [...(w.chain || []), row];
+        }
+      }
+
+      // Саженцы растут на таком же поле и так же пьют. Отдельной строкой
+      // в цепочке их нет, поэтому добавляем сюда — иначе их вода и
+      // удобрения не попали бы ни в один баланс.
+      const sapRows = [];
+      const sapOpt = this.saplingOpt;
+      if (this.saplingNeed > 1e-9 && sapOpt && sapOpt.rate) {
+        const c = (fp.layout.cover || []).find(x => x.item === 'Tree Sapling');
+        const load = c ? c.got : this.saplingNeed / sapOpt.rate;
+        sapRows.push({
+          key: 'sapling', item: 'Tree Sapling',
+          item_display: this.sapling.item_display, cat: 'food', need: null,
+          options: [sapOpt], opt: sapOpt, level: 0, parentDisplay: '',
+          qty: this.saplingNeed, machines: this.saplingNeed / sapOpt.rate,
+          built: Math.ceil(load - 1e-9), load,
+          workers: load * sapOpt.workers,
+          power: load * Math.max(0, sapOpt.electricity_kw),
+          computing: 0,
+          inputs: sapOpt.inputs.map(i => ({ ...i, qty: i.qty_per_min * load })),
+          byproducts: [], maintenance: [],
+        });
+      }
+
+      // Удобрения делаются из компоста, который план уже производит:
+      // с ферм и с очистных. Считаем их до воды и электричества — смеситель
+      // и химзавод тоже висят на этих балансах.
+      let compost = 0;
+      for (const g of this.recyclingOf(fp)) {
+        for (const o of g.outputs) if (o.item === 'Compost') compost += o.qty;
+      }
+      for (const r of wasteDisposal) {
+        if (r.item === 'Compost') compost += r.qty;
+        for (const o of (r.byproducts || [])) if (o.item === 'Compost') compost += o.qty;
+      }
+      const fertRows = this.buildFert(
+        [...fp.rows, ...sapRows, ...medicine, ...goods, ...waste, ...wasteDisposal],
+        compost);
+
+      // Для учёта общих ресурсов берём уникальные строки, а не дерево:
+      // в дереве полуфабрикат встречается ссылками по нескольку раз, и вода
+      // с электричеством считались бы на каждое упоминание.
+      const base = [...fp.rows, ...sapRows, ...medicine, ...goods, ...waste,
+                    ...wasteDisposal, ...fertRows];
+
+      // Порядок важен и он такой:
+      //   вычисления -> вода -> электроэнергия.
+      // Охладитель тратит воду, а ЦОД её же возвращает, поэтому воду можно
+      // считать только после вычислений. Насосы и ЦОД едят электричество,
+      // поэтому электроэнергия считается последней.
+      const compNeed  = this.needs.find(n => n.item === 'Computing');
+      const computing = this.sharedRow('Computing', base);
+      const compChain = computing && compNeed
+        ? this.expandFrom(computing, compNeed).map(r => ({ ...r, cat: 'utility' }))
+        : [];
+      if (computing) computing.chain = compChain;
+
+      const withComp = [...base, computing, ...compChain].filter(Boolean);
+      const water    = this.sharedRow('Water', withComp);
+      const elec     = this.sharedRow('Electricity',
+                         [...withComp, water].filter(Boolean));
+
+      const utility = [];
+      if (water) utility.push(water);
+      utility.push(...waste);
+      if (computing) utility.push(computing);
+      if (elec) utility.push(elec);
+      for (const u of utility) u.flowsHtml = this.flowsCell(u);
+
+      // Цепочку вычислений разворачиваем в тот же плоский список: она
+      // рисуется такими же карточками с отступом, а не вложенной таблицей.
+      const utilFlat = [];
+      for (const u of utility) {
+        utilFlat.push(u);
+        for (const c of (u.chain || [])) utilFlat.push({ ...c, level: 1 });
+      }
+
+      const mkSection = (key, title, rows) => ({
+        key, title, rows,
+        // Колонка вычислений нужна только если в разделе их кто-то тратит.
+        hasComputing: rows.some(r => (r.computing || 0) > 0.05),
+        // Группа предыдущего корня — по ней ставится разделитель между
+        // группами питания; вложенные строки её не сбивают.
+        prevGroup: rows.map((_, i) => {
+          for (let j = i - 1; j >= 0; j--) if (!rows[j].level) return rows[j].foodGroup;
+          return null;
+        }),
+      });
+
+      // Мак и тростник растут ради лекарств. Ставим их не отдельным корнем
+      // в конце, а под тем узлом, который их потребляет.
+      const health = [...medicine];
+      for (const branch of this.splitRoots(fp.extra || [])) {
+        const root = branch[0];
+        const at = health.findIndex(m => m.opt && !m.off
+                                      && m.opt.inputs.some(i => i.item === root.item));
+        if (at < 0) { health.push(...branch); continue; }
+        const base = health[at].level + 1;
+        health[at] = { ...health[at],
+                       inputs: health[at].inputs.filter(i => i.item !== root.item) };
+        health.splice(at + 1, 0, ...branch.map(r => ({ ...r, level: r.level + base })));
+      }
+
+      const sections = [
+        mkSection('food',    '{{ t('population.group_food') }}',    food),
+        mkSection('health',  '{{ t('population.medicine_tree') }}', health),
+        mkSection('goods',   '{{ t('population.group_goods') }}',   goods),
+        mkSection('utility', '{{ t('population.group_utility') }}', utilFlat),
+        mkSection('fertilizer', '{{ t('population.group_fertilizer') }}', fertRows),
+      ];
+
+      return { food, foodInfo: fp, medicine, goods, waste, utility, sections,
+               all: [...base, computing, ...compChain, water, elec].filter(Boolean) };
+    },
+
+    // Плоский список строк с уровнями режем на поддеревья по корням.
+    splitRoots(rows) {
+      const out = [];
+      for (const r of rows) {
+        if (!r.level || !out.length) out.push([r]);
+        else out[out.length - 1].push(r);
+      }
+      return out;
+    },
+
+    // ── ячейки ──────────────────────────────────────────────────────
+    optionLabel(o, unit) {
+      if (o.dumping) return o.building_display;
+      const extra = o.inputs.length ? ' · ' + o.inputs.map(i => i.item_display).join(', ') : '';
+      return o.building_display + ' (' + this.fmt(o.rate, 1) + ' ' + this.unitLabel(unit) + ')' + extra;
+    },
+    // В еде здание задаётся слева фермой, удобрением и уровнем, поэтому в
+    // списке остаётся только сырьё и темп.
+    kindLabel(o, unit) {
+      const kind = o.kind_display && o.kind_display !== '—'
+                 ? o.kind_display : o.building_display;
+      return kind + ' · ' + this.fmt(o.rate, 1) + ' ' + this.unitLabel(unit);
+    },
+    // Расшифровка нужна, когда есть что складывать: несколько потребителей
+    // или потребитель вместе с возвратом. Одна-единственная строка только
+    // повторяет то, что и так видно выше по дереву.
+    showParts(r) {
+      return (r.parts || []).length > 1;
+    },
+    recipeCell(r) {
+      if (!r.options || !r.options.length) return '<span class="text-slate-400">—</span>';
+      const unit = r.need ? r.need.unit : 'per_min';
+
+      // Вне пищевой цепочки рецепты друг с другом не конкурируют и здание
+      // ниоткуда больше не берётся — показываем весь список как есть.
+      if (r.cat !== 'food') {
+        if (r.options.length === 1) {
+          return '<span>' + this.esc(r.options[0].building_display) + '</span>';
+        }
+        if (this.twoAxis(r.options)) return this.twoAxisCell(r);
+        const cur = r.opt ? r.opt.recipe_id : null;
+        let html = '<select class="w-full max-w-72 px-2 py-1 rounded border border-slate-300 '
+                 + 'dark:border-slate-600 bg-white dark:bg-slate-700 text-sm" '
+                 + 'onchange="Alpine.$data(this).setChoice(\'' + r.key + '\', this.value)">';
+        for (const o of r.options) {
+          html += '<option value="' + o.recipe_id + '"'
+                + (o.recipe_id === cur ? ' selected' : '') + '>'
+                + this.esc(this.optionLabel(o, unit)) + '</option>';
+        }
+        return html + '</select>';
+      }
+
+      // У культур выбора нет вовсе: ферма и удобрение заданы слева, а «родом»
+      // рецепта у них оказалось бы само удобрение.
+      if (r.options.every(o => o.farm)) {
+        return '<span>' + this.esc(r.opt ? r.opt.building_display : '—') + '</span>';
+      }
+
+      // Здание выбирается слева — фермой, удобрением и уровнем семейства.
+      // Здесь остаётся только выбор рецепта по сырью, поэтому варианты
+      // сворачиваем по «роду», а внутри рода берём подходящий по этим
+      // параметрам. Иначе в списке снова оказывались бы теплицы и смесители.
+      const byKind = {};
+      for (const o of r.options) {
+        if (!o.is_primary && r.options.some(x => x.is_primary)) continue;
+        (byKind[o.kind] = byKind[o.kind] || []).push(o);
+      }
+      const kinds = Object.keys(byKind);
+      const picked = {};
+      for (const k of kinds) picked[k] = this.pickVariant(byKind[k], r.item) || byKind[k][0];
+
+      const bld = r.opt ? r.opt.building_display : '';
+      if (kinds.length <= 1) return '<span>' + this.esc(bld) + '</span>';
+
+      const cur = r.opt ? r.opt.kind : null;
+      let html = '<div>' + (bld ? '<div class="mb-0.5">' + this.esc(bld) + '</div>' : '')
+               + '<select class="w-full max-w-72 px-2 py-1 rounded border border-slate-300 '
+               + 'dark:border-slate-600 bg-white dark:bg-slate-700 text-sm" '
+               + 'onchange="Alpine.$data(this).setChoice(\'' + r.key + '\', this.value)">';
+      for (const k of kinds) {
+        const o = picked[k];
+        const sel = k === cur ? ' selected' : '';
+        html += '<option value="' + o.recipe_id + '"' + sel + '>'
+              + this.esc(this.kindLabel(o, unit)) + '</option>';
+      }
+      return html + '</select></div>';
+    },
+    // Здание и рецепт двумя списками: смена уровня не сбивает рецепт,
+    // смена рецепта не сбивает уровень.
+    twoAxisCell(r) {
+      const cur = r.opt || {};
+      const sel = 'w-full max-w-72 px-2 py-1 rounded border border-slate-300 '
+                + 'dark:border-slate-600 bg-white dark:bg-slate-700 text-sm';
+      let html = '<select class="' + sel + '" '
+               + 'onchange="Alpine.$data(this).setBuilding(\'' + r.key + '\', this.value)">';
+      for (const b of this.buildingsOf(r.options)) {
+        html += '<option value="' + this.esc(b.building) + '"'
+              + (b.building === cur.building ? ' selected' : '') + '>'
+              + this.esc(b.display) + '</option>';
+      }
+      html += '</select>';
+      const kinds = [];
+      for (const o of r.options) {
+        if (o.building === cur.building && !kinds.some(x => x.kind === o.kind)) kinds.push(o);
+      }
+      if (kinds.length > 1) {
+        html += '<select class="' + sel + ' mt-1" '
+              + 'onchange="Alpine.$data(this).setKind(\'' + r.key + '\', this.value)">';
+        for (const o of kinds) {
+          html += '<option value="' + this.esc(o.kind) + '"'
+                + (o.kind === cur.kind ? ' selected' : '') + '>'
+                + this.esc(o.kind_display) + '</option>';
+        }
+        html += '</select>';
+      }
+      return html;
+    },
+
+    // Здание для строки развилки: рецепты там выбираются галочками, а
+    // уровень здания — обычным списком над ними.
+    forkBuildingCell(r) {
+      const c = this.chain[r.item];
+      if (!c || !r.opt) return '';
+      const blds = this.buildingsOf(c.options.filter(o => o.is_primary));
+      if (blds.length < 2) {
+        return '<div class="text-sm">' + this.esc(r.opt.building_display) + '</div>';
+      }
+      let html = '<select class="w-full max-w-72 px-2 py-1 rounded border border-slate-300 '
+               + 'dark:border-slate-600 bg-white dark:bg-slate-700 text-sm mb-1" '
+               + 'onchange="Alpine.$data(this).setChainBuilding(\'' + r.item + '\', this.value)">';
+      for (const b of blds) {
+        html += '<option value="' + this.esc(b.building) + '"'
+              + (b.building === r.opt.building ? ' selected' : '') + '>'
+              + this.esc(b.display) + '</option>';
+      }
+      return html + '</select>';
+    },
+
+    flowsCell(r) {
+      let html = '';
+      if (r.inputs && r.inputs.length) {
+        html += '<div class="flex flex-wrap gap-x-3 gap-y-1">';
+        for (const i of r.inputs) {
+          // Сырьё из остатков отмечаем янтарным: его не растили специально,
+          // оно осталось от округления числа плантаций.
+          const sp = i.spare ? ' class="text-amber-600 dark:text-amber-400"' : '';
+          html += '<span class="inline-flex items-center gap-1 whitespace-nowrap"'
+                + (!i.spare ? ''
+                   : i.spareOnly ? ' title="{{ t('population.from_spare') }}"'
+                                 : ' title="{{ t('population.from_extra') }}"') + '>'
+                + '<img src="' + this.iconOf(i.item) + '" class="w-4 h-4" onerror="this.style.display=\'none\'">'
+                + '<span' + sp + '>' + this.esc(i.item_display) + '</span>'
+                + '<span class="tabular-nums ' + (i.spare ? 'text-amber-600 dark:text-amber-400'
+                                                          : 'text-slate-500 dark:text-slate-400')
+                + '">' + this.fmt(i.qty, 2) + '</span></span>';
+        }
+        html += '</div>';
+      }
+      if (r.byproducts && r.byproducts.length) {
+        html += '<div class="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-emerald-600 dark:text-emerald-400">';
+        for (const o of r.byproducts) {
+          html += '<span class="inline-flex items-center gap-1 whitespace-nowrap">+'
+                + (o.item ? '<img src="' + this.iconOf(o.item) + '" class="w-4 h-4" onerror="this.style.display=\'none\'">' : '')
+                + '<span>' + this.esc(o.item_display) + '</span>'
+                + (o.qty === null ? '' : '<span class="tabular-nums">' + this.fmt(o.qty, 2) + '</span>')
+                + '</span>';
+        }
+        html += '</div>';
+      }
+      return html;
+    },
+
+    // ── РАСКЛАДКА КУЛЬТУР ПО ПОЛЯМ ──────────────────────────────────
+    //
+    // У фермы четыре слота. В них сажают от двух до четырёх разных культур,
+    // причём одна культура может занять несколько слотов. Ферма проходит
+    // слоты по кругу, поэтому доля культуры — это сумма циклов её слотов к
+    // сумме циклов всех занятых. Одна культура на поле разрешена только
+    // тогда, когда она вообще одна: иначе перерасход удобрений.
+    //
+    // Задача: покрыть дробные машины каждой культуры минимальным числом
+    // полей. Нижняя граница — округлённая вверх сумма машин, но доли
+    // складываются из циклов и в неё попадают не всегда, поэтому число
+    // полей наращивается, пока раскладка не найдётся.
+    get farmLayout() {
+      return (this.plan.foodInfo && this.plan.foodInfo.layout)
+             || { crops: [], farms: 0, min: 0, groups: [], cover: [], short: 0,
+                  totals: { need: 0, got: 0, extra: 0 } };
+    },
+    // Перебор дорогой, а за один расчёт упаковка зовётся дважды с разной
+    // потребностью, поэтому результат кешируется по ней.
+    packCached(crops, links) {
+      if (!crops.length) return { crops: [], farms: 0, min: 0, groups: [], cover: [],
+                                  short: 0, totals: { need: 0, got: 0, extra: 0 } };
+      const sig = crops.map(c => c.item + ':' + c.cycle + ':' + c.need.toFixed(6))
+                       .sort().join('|')
+                + '#' + (links || []).map(L => L.dead + '>' + L.sub + ':' + L.k.toFixed(4))
+                                     .sort().join(',');
+      if (layoutCache[sig]) return layoutCache[sig];
+      const keys = Object.keys(layoutCache);
+      if (keys.length > 8) delete layoutCache[keys[0]];
+      return (layoutCache[sig] = this.packFarms(crops, links));
+    },
+
+    packFarms(crops, links) {
+      const n = crops.length;
+      if (!n) return { crops: [], farms: 0, min: 0, groups: [], cover: [], short: 0 };
+      const req = crops.map(c => c.need);
+      const cyc = crops.map(c => c.cycle);
+      const total = req.reduce((s, v) => s + v, 0);
+      const min = Math.max(1, Math.ceil(total - 1e-9));
+
+      // Все раскладки одного поля: сочетания с повторениями по 2..4 слота.
+      const cfg = [];
+      const combo = [];
+      const build = (start) => {
+        if (combo.length >= 2 && (new Set(combo).size >= 2 || n === 1)) {
+          const t = combo.reduce((s, i) => s + cyc[i], 0);
+          const share = new Array(n).fill(0);
+          for (const i of combo) share[i] += cyc[i] / t;
+          cfg.push({ combo: combo.slice(), share });
+        }
+        if (combo.length === 4) return;
+        for (let i = start; i < n; i++) { combo.push(i); build(i); combo.pop(); }
+      };
+      build(0);
+      // Короткие раскладки вперёд: при равной пользе жадный шаг возьмёт
+      // первую, а поле из двух культур проще, чем из четырёх.
+      cfg.sort((a, b) => a.combo.length - b.combo.length
+                      || new Set(a.combo).size - new Set(b.combo).size);
+      if (!cfg.length) return { crops, farms: 0, min, groups: [], cover: [], short: 0 };
+
+      // Свой генератор случайных чисел: раскладка не должна прыгать от
+      // перерисовки к перерисовке.
+      let seed = 20260813;
+      const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+
+      // Излишек излишку рознь. У рапса его можно только сжечь, остальные
+      // культуры уходят в газ. Поэтому среди раскладок, закрывающих
+      // потребность, выбираем ту, где лишнее приходится не на рапс.
+      const wasteW = crops.map(c => {
+        const d = this.disposal[c.item] || [];
+        return (!d.length || d.every(o => o.disposal === 'burn')) ? 1 : 0;
+      });
+      // Связка протокола: тупиковую культуру сажаем не больше нормы (hi),
+      // и чем меньше посадили, тем больше нужно заменителя (bind).
+      const idx = {};
+      crops.forEach((c, j) => { idx[c.item] = j; });
+      const lo = req.slice(), hi = crops.map(() => Infinity), pull = crops.map(() => 0);
+      const bind = [];
+      for (const L of (links || [])) {
+        const a = idx[L.dead], b = idx[L.sub];
+        if (a === undefined || b === undefined) continue;
+        hi[a] = req[a]; lo[a] = 0; pull[a] = L.k; wasteW[a] = 0;
+        bind.push({ a, b, target: req[a], k: L.k, base: req[b] });
+      }
+      const loAt = (got, j) => {
+        for (const B of bind) if (B.b === j) return B.base + B.k * Math.max(0, B.target - got[B.a]);
+        return lo[j];
+      };
+      const wasteOf = (got) => {
+        let w = 0;
+        for (let j = 0; j < n; j++) w += wasteW[j] * Math.max(0, got[j] - loAt(got, j));
+        return w;
+      };
+
+      const gotOf = (sol) => {
+        const got = new Array(n).fill(0);
+        for (const k of sol) {
+          const s = cfg[k].share;
+          for (let j = 0; j < n; j++) got[j] += s[j];
+        }
+        return got;
+      };
+      const shortOf = (got) => {
+        let sf = 0;
+        for (let j = 0; j < n; j++) {
+          sf += Math.max(0, loAt(got, j) - got[j]) + Math.max(0, got[j] - hi[j]);
+        }
+        return sf;
+      };
+      // Недобор — запрет, бесполезный излишек — штраф, недосев тупиковой
+      // культуры — штраф по цене замены. Ищем по сумме сразу, а не «сначала
+      // покрытие, потом доводка»: рапс обычно раскидан по нескольким полям,
+      // и правкой одного поля из локального минимума не выбраться.
+      const costOf = (got) => {
+        let c = 1000 * shortOf(got) + wasteOf(got);
+        for (let j = 0; j < n; j++) {
+          if (pull[j] && hi[j] < Infinity) c += pull[j] * Math.max(0, hi[j] - got[j]);
+        }
+        return c;
+      };
+
+      // Жадно: поле за полем берём раскладку, закрывающую больше всего
+      // недостающего. Разброс нужен для перезапусков.
+      const greedy = (N, jitter) => {
+        const rem = req.slice(), sol = [];
+        for (let f = 0; f < N; f++) {
+          let best = -Infinity, bk = 0;
+          for (let k = 0; k < cfg.length; k++) {
+            const s = cfg[k].share;
+            let v = 0;
+            for (let j = 0; j < n; j++) {
+              const need = Math.max(0, rem[j]);
+              v += Math.min(s[j], need);
+              // Пересадить бесполезную культуру хуже, чем недосадить.
+              v -= wasteW[j] * Math.max(0, s[j] - need);
+            }
+            if (jitter) v += rnd() * jitter;
+            if (v > best) { best = v; bk = k; }
+          }
+          sol.push(bk);
+          for (let j = 0; j < n; j++) rem[j] -= cfg[bk].share[j];
+        }
+        return sol;
+      };
+
+      // Локальный поиск: меняем раскладку одного поля, пока недобор падает.
+      const tmp = new Array(n);
+      const improve = (sol) => {
+        let got = gotOf(sol), cost = costOf(got);
+        for (let round = 0; round < 20; round++) {
+          let moved = false;
+          for (let f = 0; f < sol.length; f++) {
+            const base = got.map((v, j) => v - cfg[sol[f]].share[j]);
+            let bv = cost, bk = sol[f];
+            for (let k = 0; k < cfg.length; k++) {
+              const s = cfg[k].share;
+              for (let j = 0; j < n; j++) tmp[j] = base[j] + s[j];
+              const v = costOf(tmp);
+              if (v < bv - 1e-12) { bv = v; bk = k; }
+            }
+            if (bk !== sol[f]) {
+              sol[f] = bk;
+              got = base.map((v, j) => v + cfg[bk].share[j]);
+              cost = bv;
+              moved = true;
+            }
+          }
+          if (!moved) break;
+        }
+        return { sol, got, sf: shortOf(got) };
+      };
+
+      // Одинаковых полей лучше больше: их проще строить. Сводим раскладки
+      // к уже встречающимся, пока покрытие не страдает.
+      const tidy = (sol, got) => {
+        for (let round = 0; round < 6; round++) {
+          const cnt = {};
+          for (const k of sol) cnt[k] = (cnt[k] || 0) + 1;
+          let moved = false;
+          for (let f = 0; f < sol.length; f++) {
+            const base = got.map((v, j) => v - cfg[sol[f]].share[j]);
+            const cand = Object.keys(cnt).map(Number)
+              .filter(k => k !== sol[f] && cnt[k] > (cnt[sol[f]] || 0))
+              .sort((a, b) => cnt[b] - cnt[a]);
+            for (const k of cand) {
+              const s = cfg[k].share;
+              for (let j = 0; j < n; j++) tmp[j] = base[j] + s[j];
+              if (shortOf(tmp) <= 1e-9) {
+                cnt[sol[f]]--; cnt[k]++;
+                sol[f] = k;
+                got = base.map((v, j) => v + s[j]);
+                moved = true;
+                break;
+              }
+            }
+          }
+          if (!moved) break;
+        }
+        return { sol, got };
+      };
+
+      // Раскладок, закрывающих потребность, обычно несколько. Сначала берём
+      // ту, где меньше бесполезного излишка, а при равенстве — где меньше
+      // разных полей: одинаковые проще строить.
+      const variety = (sol) => new Set(sol).size;
+      let best = null, fin = null, finW = Infinity;
+      for (let extra = 0; extra <= 4 && !fin; extra++) {
+        // Перезапуски нужны для разнообразия, но гонять все пятнадцать без
+        // толку дорого: перебор — самая тяжёлая часть расчёта. Останавливаемся,
+        // если четыре подряд ничего не улучшили или цена уже нулевая.
+        let idle = 0;
+        for (let t = 0; t < 15 && idle < 4; t++) {
+          const res = improve(greedy(min + extra, t ? 0.25 : 0));
+          if (res.sf > 1e-9) { if (!best || res.sf < best.sf) best = res; idle++; continue; }
+          const cand = tidy(res.sol, res.got);
+          const w = costOf(cand.got);
+          if (!fin || w < finW - 1e-9
+              || (Math.abs(w - finW) < 1e-9 && variety(cand.sol) < variety(fin.sol))) {
+            fin = cand; finW = w; idle = 0;
+          } else {
+            idle++;
+          }
+          if (finW <= 1e-9) break;
+        }
+      }
+      if (!fin) fin = tidy(best.sol, best.got);
+
+      const cnt = {};
+      for (const k of fin.sol) cnt[k] = (cnt[k] || 0) + 1;
+      const groups = Object.keys(cnt).map(Number).map(k => {
+        const c = cfg[k].combo;
+        const uniq = [...new Set(c)].sort((a, b) => c.filter(x => x === b).length
+                                                  - c.filter(x => x === a).length);
+        return {
+          key: 'g' + k, count: cnt[k],
+          slots: uniq.map(i => ({ item: crops[i].item, display: crops[i].display,
+                                  n: c.filter(x => x === i).length,
+                                  share: cfg[k].share[i] })),
+        };
+      }).sort((a, b) => b.count - a.count || b.slots.length - a.slots.length);
+
+      const cover = crops.map((c, j) => ({
+        item: c.item, display: c.display, rate: c.rate,
+        need: req[j], got: fin.got[j], extra: fin.got[j] - req[j],
+        needQty: req[j] * c.rate, out: fin.got[j] * c.rate,
+        outExtra: (fin.got[j] - req[j]) * c.rate,
+      })).sort((a, b) => b.need - a.need);
+
+      let short = 0;
+      for (let j = 0; j < n; j++) short += Math.max(0, req[j] - fin.got[j]);
+      // «Даёт машин» в сумме равно числу полей: доли одного поля дают
+      // единицу. Разница с потребностью и есть излишек ферм.
+      const sum = (f) => cover.reduce((s, c) => s + f(c), 0);
+      const totals = { need: sum(c => c.need), got: sum(c => c.got),
+                       extra: sum(c => c.extra) };
+      return { crops, farms: fin.sol.length, min, groups, cover, short, totals };
+    },
+
+    // ── ПЕРЕРАБОТКА ИЗЛИШКОВ ────────────────────────────────────────
+    //
+    // Что план вырастил и не съел. Три источника: урожай сверх потребности
+    // (поля целые, потребность дробная), излишки внутри цепочки (яйца идут
+    // с птицефермы вместе с тушками) и побочные выходы, которых никто не ест.
+    get leftovers() { return this.leftoversOf(this.plan.foodInfo); },
+    leftoversOf(fp) {
+      const lay = (fp && fp.layout) || { cover: [] };
+      const bag = {};
+      const add = (item, display, qty) => {
+        if (!(qty > 1e-6)) return;
+        (bag[item] = bag[item] || { item, display, qty: 0 }).qty += qty;
+      };
+      for (const c of lay.cover) {
+        // usedSpare уже съеден подбирающим рецептом развилки, в потребность
+        // он не попал — вычитаем отдельно, иначе посчитали бы дважды.
+        // Саженцы в пищевой цепочке не числятся: их расход — это древесина.
+        const wood = c.item === 'Tree Sapling' ? this.saplingNeed : 0;
+        add(c.item, c.display,
+            c.out - (fp.demand[c.item] || 0) - ((fp.usedSpare || {})[c.item] || 0) - wood);
+      }
+      for (const [item, q] of Object.entries(fp.surplus || {})) {
+        const c = this.chain[item];
+        if (c && !c.is_crop) add(item, c.item_display, q);
+      }
+      const made = new Set();
+      for (const r of fp.rows) {
+        made.add(r.item);
+        for (const x of (r.coItems || [])) made.add(x);
+      }
+      for (const r of fp.rows) {
+        for (const o of (r.byproducts || [])) {
+          if (!o.item || made.has(o.item) || this.chain[o.item]) continue;
+          add(o.item, o.item_display, o.qty);
+        }
+      }
+      return Object.values(bag).sort((a, b) => b.qty - a.qty);
+    },
+
+    // Способы отсортированы на сервере: газ, потом компост, потом горелка.
+    // Берём первый доступный — сжигаем только то, что деть больше некуда.
+    // Здание внутри способа выбирается пользователем, по умолчанию — то,
+    // что помещается в выбранный уровень семейства.
+    disposalOpt(item) {
+      const list = this.disposal[item] || [];
+      if (!list.length) return null;
+      const kind = list[0].disposal;
+      const same = list.filter(o => o.disposal === kind);
+      const want = this.dispChoice[kind];
+      return same.find(o => o.building === want)
+          || same.find(o => this.tierOk(o)) || same[0];
+    },
+    setDispBuilding(kind, building) { this.dispChoice[kind] = building; this.save(); },
+
+    // ── УДОБРЕНИЯ ────────────────────────────────────────────────────
+    //
+    // Тип задан выбором слева. Второе удобрение делается из первого, первое —
+    // с органическим или без него, органическое — из компоста, который план
+    // и так производит. Рецепт органического (с грунтом или без) выбирает
+    // пользователь, а вот делить первое между двумя рецептами выбора не
+    // требует: сколько хватило компоста, столько и идёт через органическое,
+    // остаток — по короткому рецепту.
+    fertRow(key, item, opt, qty, level, fromSpare) {
+      const machines = opt.rate ? qty / opt.rate : 0;
+      const built = Math.ceil(machines - 1e-9);
+      return {
+        key, item, item_display: (this.fert[item] || {}).item_display || item,
+        cat: 'fertilizer', need: null, level, parentDisplay: '',
+        options: (this.fert[item] || {}).options || [], opt,
+        qty, machines, built,
+        workers: machines * opt.workers,
+        power: machines * Math.max(0, opt.electricity_kw),
+        computing: machines * Math.max(0, -opt.computing_tf),
+        inputs: opt.inputs.map(i => ({ ...i, qty: i.qty_per_min * machines })),
+        byproducts: opt.outputs.filter(o => o.item !== item)
+                              .map(o => ({ ...o, qty: o.qty_per_min * machines })),
+        maintenance: opt.maintenance.map(m => ({ ...m, qty: m.rate_per_min * built })),
+        fromSpare: !!fromSpare, fert: true,
+      };
+    },
+
+    buildFert(rows, compost) {
+      const F = this.fert || {}, ORG = 'Fertilizer (Organic)';
+      const target = this.fertilizer;
+      if (!target || !F[target]) return [];
+      let want = 0;
+      for (const r of rows) {
+        if (r.off) continue;
+        for (const i of (r.inputs || [])) if (i.item === target) want += i.qty;
+      }
+      if (want <= 1e-9) return [];
+
+      const per = (o, it) => {
+        const f = o.inputs.find(x => x.item === it);
+        return f && o.rate ? f.qty_per_min / o.rate : 0;
+      };
+      const out = [];
+      let item = target, level = 0, guard = 6;
+
+      while (item && F[item] && want > 1e-9 && guard-- > 0) {
+        const opts = F[item].options;
+        let node = null, nextItem = null, nextWant = 0;
+
+        const usesOrg = (o) => o.inputs.some(i => i.item === ORG);
+        if (item !== ORG && F[ORG] && opts.some(usesOrg) && opts.some(o => !usesOrg(o))) {
+          const org = this.chosenOption('fert:' + item + ':org', opts.filter(usesOrg));
+          const raw = this.chosenOption('fert:' + item + ':raw', opts.filter(o => !usesOrg(o)));
+          const oOpt = this.chosenOption('fert:' + ORG, F[ORG].options);
+          const cPer = oOpt ? per(oOpt, 'Compost') : 0;
+          const orgMax = cPer > 0 ? compost / cPer : 0;      // органики в минуту
+          const oPer = org ? per(org, ORG) : 0;
+          const fromOrg = (org && oPer > 0) ? Math.min(want, orgMax / oPer) : 0;
+          const list = [];
+          if (fromOrg > 1e-9) {
+            list.push(this.fertRow('fert:' + item + ':org', item, org, fromOrg, level, true));
+          }
+          if (want - fromOrg > 1e-9 && raw) {
+            list.push(this.fertRow('fert:' + item, item, raw, want - fromOrg, level, false));
+          }
+          if (!list.length) break;
+          node = list.length > 1 ? this.mergeChainRows(list) : list[0];
+          // Выбирать тут нечего: делится автоматически по остатку компоста.
+          node.options = [node.opt];
+          nextItem = ORG;
+          nextWant = fromOrg * oPer;
+        } else {
+          const opt = this.chosenOption('fert:' + item, opts);
+          if (!opt || !opt.rate) break;
+          node = this.fertRow('fert:' + item, item, opt, want, level, false);
+          const child = opt.inputs.find(i => F[i.item]);
+          if (child) { nextItem = child.item; nextWant = child.qty_per_min * node.machines; }
+        }
+        // Ингредиент, расписанный строкой ниже, из состава убираем.
+        if (nextItem) node.inputs = node.inputs.filter(i => i.item !== nextItem);
+        out.push(node);
+        item = nextItem; want = nextWant; level += 1;
+      }
+      return out;
+    },
+
+    // Переработка побочного выхода отдельной строкой: заглавным идёт то, что
+    // из неё получается, сырьё — сам отход.
+    disposalRow(src, opt) {
+      const machines = src.qty / opt.rate;
+      const built = Math.ceil(machines - 1e-9);
+      const outs = opt.outputs.map(x => ({ ...x, qty: x.qty_per_min * machines }));
+      const main = outs[0] || { item: null, item_display: '', qty: 0 };
+      return {
+        key: 'disp:' + src.item, item: main.item, item_display: main.item_display,
+        cat: 'utility', need: null, options: [opt], opt, level: 1, parentDisplay: '',
+        qty: main.qty, machines, built,
+        workers: machines * opt.workers,
+        power: machines * Math.max(0, opt.electricity_kw),
+        computing: machines * Math.max(0, -opt.computing_tf),
+        inputs: [{ item: src.item, item_display: src.item_display, qty: src.qty }],
+        byproducts: outs.slice(1),
+        maintenance: opt.maintenance.map(m => ({ ...m, qty: m.rate_per_min * built })),
+        disposalOf: src.item,
+      };
+    },
+
+    // Режем не по перерабатываемому, а по производимому: важно, сколько
+    // строить биореакторов и смесителей, а не сколько видов сырья в них летит.
+    get recycling() { return this.recyclingOf(this.plan.foodInfo); },
+    recyclingOf(fp) {
+      // Складываем в кучи по предметам, а потом разбираем в порядке
+      // зависимости: биомасса появляется из шредера, поэтому считается
+      // после саженцев, иначе её объём вышел бы неполным.
+      const amounts = {}, name = {};
+      for (const l of this.leftoversOf(fp)) {
+        amounts[l.item] = (amounts[l.item] || 0) + l.qty;
+        name[l.item] = l.display;
+      }
+      for (const it of Object.keys(amounts)) {
+        const o = this.disposalOpt(it);
+        for (const x of (o ? o.outputs : [])) {
+          if (x.item !== it && this.disposalOpt(x.item) && !(x.item in amounts)) {
+            amounts[x.item] = 0;
+            name[x.item] = x.item_display;
+          }
+        }
+      }
+      const fromDisposal = (it) => Object.keys(amounts).some(other => {
+        if (other === it) return false;
+        const o = this.disposalOpt(other);
+        return o && o.outputs.some(x => x.item === it);
+      });
+      const queue = Object.keys(amounts)
+        .sort((a, b) => (fromDisposal(a) ? 1 : 0) - (fromDisposal(b) ? 1 : 0));
+
+      const groups = {};
+      for (const item of queue) {
+        const l = { item, display: name[item] || item, qty: amounts[item] };
+        if (!(l.qty > 1e-6)) continue;
+        const opt = this.disposalOpt(l.item);
+        if (!opt || !opt.rate) continue;
+        const g = groups[opt.disposal] || (groups[opt.disposal] = {
+          key: opt.disposal, kind: opt.disposal, opt, machines: 0,
+          items: [], out: {}, buildings: [] });
+        const m = l.qty / opt.rate;
+        g.machines += m;
+        g.opt = opt;
+        g.items.push({ item: l.item, display: l.display, qty: l.qty, machines: m });
+        for (const o of opt.outputs) {
+          const b = g.out[o.item] || (g.out[o.item] = {
+            item: o.item, item_display: o.item_display, qty: 0 });
+          b.qty += o.qty_per_min * m;
+          // Что само перерабатывается дальше — кладём в его кучу.
+          if (o.item !== l.item && o.item in amounts) amounts[o.item] += o.qty_per_min * m;
+        }
+        for (const o of (this.disposal[l.item] || [])) {
+          if (o.disposal !== g.kind || g.buildings.some(x => x.building === o.building)) continue;
+          g.buildings.push({ building: o.building, display: o.building_display });
+        }
+      }
+      return Object.values(groups).map(g => {
+        const outs = Object.values(g.out).sort((a, b) => b.qty - a.qty);
+        const main = outs[0] || { item: null, item_display: '', qty: 0 };
+        const built = Math.ceil(g.machines - 1e-9);
+        return {
+          // outputs — весь выход, он идёт в сводку. В строке показываем
+          // только побочный: главный уже стоит в заголовке.
+          ...g, outputs: outs, extras: outs.slice(1),
+          item: main.item, title: main.item_display, qty: main.qty,
+          built, workers: g.machines * g.opt.workers,
+          power: g.machines * Math.max(0, g.opt.electricity_kw),
+          computing: g.machines * Math.max(0, -g.opt.computing_tf),
+          items: g.items.sort((a, b) => b.qty - a.qty),
+          buildings: g.buildings.sort((a, b) => a.display.localeCompare(b.display)),
+        };
+      }).sort((a, b) => b.machines - a.machines);
+    },
+    // Здания считаем по зданию целиком, а не построчно: биореактор жуёт
+    // восемь культур, и восемь округлений вверх дали бы восемь реакторов
+    // там, где хватает одного.
+
+    // ── итоги и сводка ──────────────────────────────────────────────
+    get totals() {
+      const rows = this.plan.all;
+      const mnt = {};
+      for (const r of rows) {
+        for (const m of (r.maintenance || [])) {
+          if (!mnt[m.item]) mnt[m.item] = { item: m.item, item_display: m.item_display, qty: 0 };
+          mnt[m.item].qty += m.qty;
+        }
+      }
+      return {
+        buildings: rows.reduce((s, r) => s + (r.built || 0), 0),
+        workers:   rows.reduce((s, r) => s + (r.workers || 0), 0),
+        maintenance: Object.values(mnt).sort((a, b) => b.qty - a.qty),
+      };
+    },
+
+    get summary() {
+      const sig = this.planSig;
+      if (sumCache.sig === sig) return sumCache.value;
+      const value = this.computeSummary();
+      sumCache.sig = sig;
+      sumCache.value = value;
+      return value;
+    },
+    computeSummary() {
+      const ind = {}, grown = {}, out = {};
+      const add = (bag, i) => {
+        const key = i.item || i.item_display;
+        if (!bag[key]) bag[key] = { item: i.item, item_display: i.item_display, qty: 0, unknown: false };
+        if (i.qty === null) bag[key].unknown = true; else bag[key].qty += i.qty;
+      };
+      const plan = this.plan;
+      const rows = plan.all;
+      // Выращиваемое — это не сырьё со стороны, а то, что план растит сам,
+      // поэтому берём производство культур. Раньше сюда попадало их
+      // потребление, и с появлением пищевой цепочки раздел опустел: культуры
+      // стали производиться внутри плана и из сырья исчезли.
+      for (const r of (plan.foodInfo ? plan.foodInfo.rows : [])) {
+        if (!r.isCrop || !r.qty) continue;
+        add(grown, { item: r.item, item_display: r.item_display, qty: r.qty });
+      }
+      // Предметы, которые план производит сам, в сырьё не попадают —
+      // иначе они считались бы дважды. Парный выход учитываем наравне с
+      // основным: тушка делается на птицеферме, а не закупается.
+      const made = new Set();
+      for (const r of rows) { made.add(r.item); for (const c of (r.coItems || [])) made.add(c); }
+      // Компост и газ план делает сам — в покупное сырьё они не попадают.
+      for (const g of this.recycling) for (const o of g.outputs) made.add(o.item);
+      for (const r of rows) if (r.disposalOf) made.add(r.item);
+      // Что уходит в переработку, на выходе уже не лежит.
+      const recycled = new Set(this.leftovers.map(l => l.item));
+      for (const r of rows) if (r.disposalOf) recycled.add(r.disposalOf);
+      // Побочный выход тоже свой: осадок с очистных не покупают, его
+      // перерабатывают. Для сырья этого достаточно, а вот «На выходе»
+      // считает по made, поэтому набор отдельный.
+      const byprod = new Set();
+      for (const r of rows) for (const o of (r.byproducts || [])) if (o.item) byprod.add(o.item);
+      for (const r of rows) {
+        // Снятые с расчёта позиции ничего не тратят: их сырьё в сводке
+        // висело бы нулями.
+        if (r.off) continue;
+        for (const i of (r.inputs || [])) {
+          if (made.has(i.item) || byprod.has(i.item)) continue;
+          add(this.grownItems.has(i.item) ? grown : ind, i);
+        }
+        for (const o of (r.byproducts || [])) {
+          // Переработанное в «На выходе» не показываем: биомасса уходит в
+          // компост, и в сводке должен стоять компост, а не она.
+          if (made.has(o.item) || recycled.has(o.item)) continue;
+          add(out, o);
+        }
+      }
+      // Что даёт переработка, показываем на выходе: газ, компост и выбросы.
+      // Кроме того, что переработка тут же и съедает: биомасса из шредера
+      // уходит в смеситель, на выходе её быть не должно.
+      const eaten = new Set();
+      for (const g of this.recycling) for (const i of g.items) eaten.add(i.item);
+      for (const g of this.recycling) {
+        for (const o of g.outputs) if (!eaten.has(o.item)) add(out, o);
+      }
+      for (const r of rows) {
+        if (!r.disposalOf || r.off) continue;
+        add(out, { item: r.item, item_display: r.item_display, qty: r.qty });
+        for (const o of (r.byproducts || [])) add(out, o);
+      }
+      // Древесину растим сами: покупаем только то, чего не хватило,
+      // а что осталось сверх внутреннего расхода — показываем на выходе.
+      const wood = this.woodNeed;
+      if (wood > 1e-9) {
+        const used = ind['Wood'] ? ind['Wood'].qty : 0;
+        const disp = ind['Wood'] ? ind['Wood'].item_display : 'Wood';
+        delete ind['Wood'];
+        if (wood > used + 1e-9) add(out, { item: 'Wood', item_display: disp, qty: wood - used });
+        else if (used > wood + 1e-9) add(ind, { item: 'Wood', item_display: disp, qty: used - wood });
+      }
+      // Что из этого забрали удобрения, на выходе уже не лежит.
+      for (const r of rows) {
+        if (!r.fert || r.off) continue;
+        for (const i of (r.inputs || [])) if (out[i.item]) out[i.item].qty -= i.qty;
+      }
+      // Нулевые остатки не показываем: они появляются, когда одна и та же
+      // позиция где-то ещё числится, но с нулевым объёмом.
+      const list = (bag) => Object.values(bag)
+        .filter(i => i.unknown || Math.abs(i.qty) > 0.0001)
+        .sort((a, b) => b.qty - a.qty);
+      return [
+        { key: 'industrial', name: '{{ t('population.cat_industrial') }}', items: list(ind)   },
+        { key: 'grown',      name: '{{ t('population.cat_grown') }}',      items: list(grown) },
+        { key: 'outputs',    name: '{{ t('population.cat_outputs') }}',    items: list(out)   },
+      ];
+    },
+  };
+}
+</script>
+</body>
+</html>

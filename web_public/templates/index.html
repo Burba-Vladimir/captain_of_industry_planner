@@ -113,6 +113,12 @@
       <button @click="setTab('community')"
               :class="tab==='community' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600'"
               class="px-3 py-1.5 transition-colors border-l border-slate-200 dark:border-slate-600">{{ t('nav.public') }}</button>
+      <!-- Нужды поселения — отдельная страница, поэтому ссылка, а не вкладка,
+           но в группе она читается как третий верхнеуровневый раздел. -->
+      <a href="/population"
+         class="px-3 py-1.5 transition-colors border-l border-slate-200 dark:border-slate-600
+                bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300
+                hover:bg-slate-50 dark:hover:bg-slate-600">{{ t('nav.needs') }}</a>
     </div>
 
     <!-- Search (browse) -->

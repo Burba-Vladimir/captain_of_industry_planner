@@ -101,7 +101,8 @@ CREATE TABLE IF NOT EXISTS resource_flows (
     complex_id    INTEGER  REFERENCES complexes (id) ON DELETE CASCADE,
     item_id       INTEGER  NOT NULL REFERENCES items (id),
     direction     SMALLINT NOT NULL CHECK (direction IN (0, 1)),
-    qty_per_cycle SMALLINT       CHECK (qty_per_cycle > 0),
+    -- Дробный: урожай ферм на удобрениях даёт нецелые значения (43,2).
+    qty_per_cycle NUMERIC(14, 6) CHECK (qty_per_cycle > 0),
     qty_per_min   NUMERIC(12, 4) CHECK (qty_per_min   > 0),
     sort_order    SMALLINT NOT NULL DEFAULT 0,
     CONSTRAINT chk_flow_parent CHECK (
@@ -360,6 +361,39 @@ CREATE TABLE IF NOT EXISTS contract_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_contract_items_contract ON contract_items (contract_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 4b. ПОТРЕБНОСТИ НАСЕЛЕНИЯ
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Нормы заданы на 10 000 жителей и масштабируются линейно.
+-- Данные наполняются миграцией migration_v9_population.sql.
+CREATE TABLE IF NOT EXISTS population_needs (
+    id          SERIAL       PRIMARY KEY,
+    -- Имя предмета как в items.name. NULL — для нагрузок без предмета (электроэнергия).
+    item        TEXT,
+    -- Подпись для интерфейса, если предмета в items нет.
+    label       TEXT         NOT NULL,
+    -- 0 = потребление (произвести и привезти)
+    -- 1 = отход       (принять и переработать)
+    -- 2 = нагрузка    (должна присутствовать в сети, не возится конвейером)
+    need_type   SMALLINT     NOT NULL CHECK (need_type IN (0, 1, 2)),
+    qty_per_10k NUMERIC(12, 4) NOT NULL CHECK (qty_per_10k > 0),
+    unit        TEXT         NOT NULL CHECK (unit IN ('per_min', 'kw', 'tf')),
+    group_key   TEXT         NOT NULL,
+    -- Взаимоисключающие варианты одной потребности (уровни лекарств): объём
+    -- потребления одинаков, отличается эффект и производственная цепочка.
+    choice_group TEXT,
+    is_default   BOOLEAN     NOT NULL DEFAULT TRUE,
+    -- Группа питания (1..4). Каждая закрывает 25% потребности в еде,
+    -- продукты внутри группы делят долю поровну; выпавшие доли
+    -- перераспределяются между оставшимися.
+    food_group   SMALLINT,
+    sort_order   SMALLINT    NOT NULL DEFAULT 0
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_population_needs_label ON population_needs (label);
+CREATE INDEX IF NOT EXISTS idx_population_needs_group ON population_needs (group_key, sort_order);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 5. АВТОРИЗАЦИЯ И ПОЛЬЗОВАТЕЛИ
