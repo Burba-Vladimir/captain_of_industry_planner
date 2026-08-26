@@ -331,6 +331,23 @@ def test_food_groups_are_exposed(client):
     assert full["Tofu"]       == pytest.approx(45,    rel=rel)
 
 
-def test_food_is_no_longer_hidden(client):
-    data = client.get("/api/population/data").get_json()
-    assert any(n["group_key"] == "food" for n in data["needs"])
+def test_food_is_no_longer_hidden(client, db_conn):
+    """Группа food когда-то пряталась из выдачи. Проверяем, что не прячется.
+
+    Своя строка, а не реальные данные: на чистой схеме (как в CI) таблица
+    потребностей пуста, и проверка по живым данным там ничего не значит.
+    """
+    with db_conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO population_needs
+                (item, label, need_type, qty_per_10k, unit, group_key, food_group, sort_order)
+            VALUES (NULL, 'ТестЕда', 0, 10, 'per_min', 'food', 1, 9001)
+            ON CONFLICT (label) DO NOTHING
+        """)
+    try:
+        data = client.get("/api/population/data").get_json()
+        assert any(n["label"] == "ТестЕда" and n["group_key"] == "food"
+                   for n in data["needs"])
+    finally:
+        with db_conn.cursor() as cur:
+            cur.execute("DELETE FROM population_needs WHERE label = 'ТестЕда'")
