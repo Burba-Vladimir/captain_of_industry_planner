@@ -498,7 +498,10 @@
                           <img :src="iconOf(sl.item)" alt="" class="w-4 h-4"
                                @error="$el.style.display='none'">
                           <span x-text="sl.display"></span>
-                          <span x-show="sl.n > 1" class="text-slate-400 dark:text-slate-500"
+                          <span x-show="sl.n > 1"
+                                class="px-1 rounded text-xs font-bold
+                                       bg-amber-100 text-amber-700
+                                       dark:bg-amber-900/50 dark:text-amber-300"
                                 x-text="'×' + sl.n"></span>
                           <span class="text-slate-500 dark:text-slate-400 tabular-nums"
                                 x-text="fmt(sl.share, 2)"></span>
@@ -1562,14 +1565,39 @@ function populationCalc() {
       }
       return out;
     },
-    // Сколько тупиковой культуры реально разложилось по полям.
+    // Сколько тупиковой культуры реально разложилось по полям. Если её в
+    // раскладке нет вовсе — значит ноль, и продукт целиком делает заменитель.
     capsOf(lay) {
       const caps = {};
       for (const L of this.forkLinks()) {
         const c = (lay.cover || []).find(x => x.item === L.dead);
-        if (c) caps[L.dead] = c.got * c.rate;
+        caps[L.dead] = c ? c.got * c.rate : 0;
       }
       return caps;
+    },
+
+    // Верхняя граница у тупиковой культуры жёсткая: вырастить её сверх нормы
+    // нельзя — излишек только горит. Если раскладка под норму не укладывается,
+    // не сажаем совсем, а её долю целиком отдаём заменителю. Перерасход
+    // разрешён лишь тогда, когда заменитель в рецепте не отмечен и связки нет.
+    packCapped(needs) {
+      const links = this.forkLinks();
+      if (!links.length) return this.packCached(needs);
+      const lay = this.packCached(needs, links);
+      const over = links.some(L => {
+        const c = (lay.cover || []).find(x => x.item === L.dead);
+        const n = needs.find(x => x.item === L.dead);
+        return c && n && c.got > n.need + 1e-9;
+      });
+      if (!over) return lay;
+      const alt = needs.filter(c => !links.some(L => L.dead === c.item))
+                       .map(c => ({ ...c }));
+      for (const L of links) {
+        const dead = needs.find(x => x.item === L.dead);
+        const sub = alt.find(x => x.item === L.sub);
+        if (dead && sub) sub.need += L.k * dead.need;
+      }
+      return this.packCached(alt);
     },
 
     // Поле поливают и удобряют весь цикл, даже если урожай девать некуда,
@@ -1918,7 +1946,7 @@ function populationCalc() {
     buildFoodPlan(medicineRows) {
       const links = this.forkLinks();
       const first = this.chainRun(medicineRows, null, null);
-      let layout = this.packCached(this.cropNeeds(first), links);
+      let layout = this.packCapped(this.cropNeeds(first));
       let fin = first;
 
       const seedOf = (lay) => {
@@ -1949,13 +1977,13 @@ function populationCalc() {
         if (!changed) {
           if (covers(layout, fin1)) { fin = fin1; done = true; }
         } else {
-          let cand = this.packCached(needs2, links);
+          let cand = this.packCapped(needs2);
           let cf = cand.farms
             ? this.chainRun(medicineRows, seedOf(cand), this.capsOf(cand)) : null;
           if (cf && !covers(cand, cf)) {
             // Потребность подвинулась ещё раз: протокол переложил часть масла
             // на сою, а её саму пришлось досаживать. Даём вторую попытку.
-            const c2 = this.packCached(this.cropNeeds(cf), links);
+            const c2 = this.packCapped(this.cropNeeds(cf));
             const f2 = c2.farms
               ? this.chainRun(medicineRows, seedOf(c2), this.capsOf(c2)) : null;
             if (f2 && covers(c2, f2)) { cand = c2; cf = f2; }
@@ -1964,13 +1992,20 @@ function populationCalc() {
           if (cf && covers(cand, cf)) { layout = cand; fin = cf; done = true; }
           else if (covers(layout, fin1)) { fin = fin1; done = true; }
         }
-        // Ничего не сошлось. Откатываемся на пару, согласованную по
-        // построению: первый проход и раскладка без протокола. Оставить
-        // капнутую раскладку с расчётом без капа нельзя — тогда рапса
-        // расходуется больше, чем растёт.
+        // Ничего не сошлось. Раньше здесь снималась связка, и рапс сразу
+        // получал право расти сверх нормы — ровно то, чего быть не должно.
+        // Теперь при связке просто не сажаем его вовсе: цепочка считается
+        // под нулевую границу, поля — под получившуюся потребность. Такая
+        // пара согласована по построению, без всяких проверок.
         if (!done) {
-          layout = links.length ? this.packCached(was) : layout;
-          fin = first;
+          if (links.length) {
+            const zero = {};
+            for (const L of links) zero[L.dead] = 0;
+            fin = this.chainRun(medicineRows, null, zero);
+            layout = this.packCached(this.cropNeeds(fin));
+          } else {
+            fin = first;
+          }
         }
       }
       // Протокол сажает тупиковую культуру меньше нормы, а нехватку
@@ -2635,15 +2670,27 @@ function populationCalc() {
       const total = req.reduce((s, v) => s + v, 0);
       const min = Math.max(1, Math.ceil(total - 1e-9));
 
-      // Все раскладки одного поля: сочетания с повторениями по 2..4 слота.
+      // Раскладки одного поля. Годятся не все: для урожая нужен севооборот,
+      // а он требует, чтобы одна культура не шла в цикле дважды подряд.
+      // В наборе 3+1 или 2+1 этого не обойти — при любом порядке две
+      // одинаковые грядки окажутся рядом. Набор 2+2 законен, но по долям
+      // совпадает с 1+1 и только занимает лишние слоты. Остаются четыре.
+      const ROTATION = new Set(['11', '111', '1111', '211']);
       const cfg = [];
       const combo = [];
       const build = (start) => {
-        if (combo.length >= 2 && (new Set(combo).size >= 2 || n === 1)) {
-          const t = combo.reduce((s, i) => s + cyc[i], 0);
-          const share = new Array(n).fill(0);
-          for (const i of combo) share[i] += cyc[i] / t;
-          cfg.push({ combo: combo.slice(), share });
+        if (combo.length >= 1) {
+          const cnt = {};
+          for (const i of combo) cnt[i] = (cnt[i] || 0) + 1;
+          const pat = Object.values(cnt).sort((a, b) => b - a).join('');
+          // Единственная культура — особый случай: чередовать не с чем,
+          // поле целиком занято ею.
+          if (n === 1 ? combo.length === 1 : ROTATION.has(pat)) {
+            const t = combo.reduce((s, i) => s + cyc[i], 0);
+            const share = new Array(n).fill(0);
+            for (const i of combo) share[i] += cyc[i] / t;
+            cfg.push({ combo: combo.slice(), share });
+          }
         }
         if (combo.length === 4) return;
         for (let i = start; i < n; i++) { combo.push(i); build(i); combo.pop(); }
