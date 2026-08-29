@@ -498,7 +498,10 @@
                           <img :src="iconOf(sl.item)" alt="" class="w-4 h-4"
                                @error="$el.style.display='none'">
                           <span x-text="sl.display"></span>
-                          <span x-show="sl.n > 1" class="text-slate-400 dark:text-slate-500"
+                          <span x-show="sl.n > 1"
+                                class="px-1 rounded text-xs font-bold
+                                       bg-amber-100 text-amber-700
+                                       dark:bg-amber-900/50 dark:text-amber-300"
                                 x-text="'×' + sl.n"></span>
                           <span class="text-slate-500 dark:text-slate-400 tabular-nums"
                                 x-text="fmt(sl.share, 2)"></span>
@@ -2667,15 +2670,27 @@ function populationCalc() {
       const total = req.reduce((s, v) => s + v, 0);
       const min = Math.max(1, Math.ceil(total - 1e-9));
 
-      // Все раскладки одного поля: сочетания с повторениями по 2..4 слота.
+      // Раскладки одного поля. Годятся не все: для урожая нужен севооборот,
+      // а он требует, чтобы одна культура не шла в цикле дважды подряд.
+      // В наборе 3+1 или 2+1 этого не обойти — при любом порядке две
+      // одинаковые грядки окажутся рядом. Набор 2+2 законен, но по долям
+      // совпадает с 1+1 и только занимает лишние слоты. Остаются четыре.
+      const ROTATION = new Set(['11', '111', '1111', '211']);
       const cfg = [];
       const combo = [];
       const build = (start) => {
-        if (combo.length >= 2 && (new Set(combo).size >= 2 || n === 1)) {
-          const t = combo.reduce((s, i) => s + cyc[i], 0);
-          const share = new Array(n).fill(0);
-          for (const i of combo) share[i] += cyc[i] / t;
-          cfg.push({ combo: combo.slice(), share });
+        if (combo.length >= 1) {
+          const cnt = {};
+          for (const i of combo) cnt[i] = (cnt[i] || 0) + 1;
+          const pat = Object.values(cnt).sort((a, b) => b - a).join('');
+          // Единственная культура — особый случай: чередовать не с чем,
+          // поле целиком занято ею.
+          if (n === 1 ? combo.length === 1 : ROTATION.has(pat)) {
+            const t = combo.reduce((s, i) => s + cyc[i], 0);
+            const share = new Array(n).fill(0);
+            for (const i of combo) share[i] += cyc[i] / t;
+            cfg.push({ combo: combo.slice(), share });
+          }
         }
         if (combo.length === 4) return;
         for (let i = start; i < n; i++) { combo.push(i); build(i); combo.pop(); }
