@@ -79,6 +79,8 @@
         ('🌐', 'Сообщество', 'Публикуйте свои комплексы и изучайте чужие. Лайки, форки, закладки.'),
         ('🏷', 'Теги', 'Помечайте комплексы тегами на любом языке, ищите по хэштегу.'),
         ('🏭', 'Вложенные комплексы', 'Используйте готовый комплекс как узел внутри другого. Стройте конгломераты любой сложности из переиспользуемых блоков.'),
+        ('🏘', 'Нужды поселения', 'Сколько еды, медикаментов, товаров и коммунальных ресурсов нужно поселению заданного размера — вплоть до числа зданий, рабочих и запчастей.'),
+        ('🌾', 'Раскладка полей', 'Культуры расставляются по плантациям сами: минимум полей, минимум бесполезных излишков. Остатки уходят в газ, компост и удобрения.'),
       ] %}
       {% else %}
       {% set features = [
@@ -88,6 +90,8 @@
         ('🌐', 'Community', 'Publish your complexes and explore others. Likes, forks, bookmarks.'),
         ('🏷', 'Tags', 'Tag complexes in any language, search by hashtag.'),
         ('🏭', 'Nested Complexes', 'Use a finished complex as a node inside another. Build conglomerates of any depth from reusable building blocks.'),
+        ('🏘', 'Settlement Needs', 'How much food, medicine, goods and utilities a settlement of a given size needs — down to buildings, workers and upkeep.'),
+        ('🌾', 'Farm Layout', 'Crops are laid out across plantations automatically: fewest fields, least wasted surplus. Leftovers go to gas, compost and fertilizer.'),
       ] %}
       {% endif %}
 
@@ -111,17 +115,10 @@
       <p class="text-slate-400 text-sm mb-5">Функции, которые появятся в следующих версиях.</p>
       <ul class="space-y-3">
         <li class="flex items-start gap-3">
-          <span class="text-xl mt-0.5">🌾</span>
+          <span class="text-xl mt-0.5">🎖</span>
           <div>
-            <p class="text-sm font-medium text-slate-200">Рациональное планирование ферм</p>
-            <p class="text-xs text-slate-400 mt-0.5">Калькулятор оптимальной раскладки посевных площадей с учётом потребности в тех или иных культурах.</p>
-          </div>
-        </li>
-        <li class="flex items-start gap-3">
-          <span class="text-xl mt-0.5">🏘</span>
-          <div>
-            <p class="text-sm font-medium text-slate-200">Расчёт потребностей поселения и производства Единства</p>
-            <p class="text-xs text-slate-400 mt-0.5">Сколько еды, товаров и жилья нужно для заданного числа жителей, и как это конвертируется в Единство.</p>
+            <p class="text-sm font-medium text-slate-200">Производство Единства</p>
+            <p class="text-xs text-slate-400 mt-0.5">Во что закрытые потребности поселения превращаются в Единстве и что выгоднее строить ради него.</p>
           </div>
         </li>
         <li class="flex items-start gap-3">
@@ -137,17 +134,10 @@
       <p class="text-slate-400 text-sm mb-5">Features planned for upcoming versions.</p>
       <ul class="space-y-3">
         <li class="flex items-start gap-3">
-          <span class="text-xl mt-0.5">🌾</span>
+          <span class="text-xl mt-0.5">🎖</span>
           <div>
-            <p class="text-sm font-medium text-slate-200">Farm Planner</p>
-            <p class="text-xs text-slate-400 mt-0.5">Optimal field layout calculator based on your crop demand and production targets.</p>
-          </div>
-        </li>
-        <li class="flex items-start gap-3">
-          <span class="text-xl mt-0.5">🏘</span>
-          <div>
-            <p class="text-sm font-medium text-slate-200">Settlement &amp; Unity Calculator</p>
-            <p class="text-xs text-slate-400 mt-0.5">How much food, goods, and housing a given population needs — and how that converts to Unity production.</p>
+            <p class="text-sm font-medium text-slate-200">Unity Production</p>
+            <p class="text-xs text-slate-400 mt-0.5">What the settlement's satisfied needs turn into in Unity, and what is worth building for it.</p>
           </div>
         </li>
         <li class="flex items-start gap-3">
