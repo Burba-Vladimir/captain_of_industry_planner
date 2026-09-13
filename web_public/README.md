@@ -1,10 +1,21 @@
 # Captain of Industry — Production Planner
 
-A free, web-based production planner for [Captain of Industry](https://www.captain-of-industry.com/).
-Design production complexes, calculate resource flows automatically, and share blueprints
-with the community.
+### 🔗 Live: **[coi-planner.com](https://coi-planner.com/)** — free, no install, no account required
+
+A web-based production planner for [Captain of Industry](https://www.captain-of-industry.com/).
+
+Design a production chain as a graph, save it as a **reusable block**, and drop that block inside
+a bigger one. Publish what you build — or start from a complex another player has already shared
+and fork it. Beyond the calculator there is a settlement-needs planner (how much food, medicine and
+goods a population of a given size actually consumes) and an automatic farm layout that handles
+crop rotation.
 
 ![CoI Production Planner](web_public/static/og-preview.png)
+
+**Reference pages** (no JavaScript needed, English and Russian):
+[all resources](https://coi-planner.com/items) ·
+[all buildings](https://coi-planner.com/buildings) ·
+[settlement needs](https://coi-planner.com/population)
 
 ---
 
@@ -18,6 +29,9 @@ with the community.
 - **Ghost complexes** — shared builds stay viewable (frozen) even after the original is deleted or hidden.
 - **Hashtags** — tag complexes and search by tag in both your library and the community.
 - **Accounts** — automatic guest sessions, one-time email codes, optional Google OAuth and Steam OpenID. Guest work merges into your account on first login.
+- **Settlement needs** — how much food, medicine, goods and utilities a population of a given size consumes, down to buildings, workers and upkeep.
+- **Farm layout** — crops distributed across plantations automatically: fewest fields, least wasted surplus, with crop rotation respected.
+- **Reference pages** — server-rendered pages for every resource and building (`/items`, `/item/<slug>`, `/buildings`, `/building/<slug>`): what makes it, what consumes it, at what rate. Work without JavaScript.
 - **i18n** — full English / Russian UI plus translated game content.
 - **Dark / light theme**, persisted locally.
 
@@ -39,6 +53,7 @@ with the community.
 web_public/
 ├── app.py              # Flask app, routes, API (dev port 5001)
 ├── auth.py             # guest UUID · email code · Google OAuth · Steam OpenID
+├── seo.py              # server-rendered reference pages · robots.txt · sitemap.xml
 ├── db.py               # psycopg2 connection helper
 ├── requirements.txt    # runtime deps
 ├── requirements-dev.txt# test/lint deps
@@ -46,7 +61,8 @@ web_public/
 ├── sql/
 │   ├── schema.sql      # full DDL — single file for a fresh database
 │   └── migration_v*.sql# incremental upgrades for existing databases
-├── templates/          # index.html · complex_editor.html · privacy.html · about.html
+├── templates/          # index.html · complex_editor.html · population.html
+│                       # about.html · privacy.html · seo_*.html · sitemap.xml
 ├── static/
 │   ├── icons/          # resource & building PNGs
 │   └── og-preview.png  # Open Graph card
@@ -112,6 +128,7 @@ Open http://localhost:5001
 | `MAX_COMPLEXES_PER_USER` | Per-account complex cap; `0` = unlimited |
 | `RATELIMIT_STORAGE_URI` | Flask-Limiter backend (default in-memory; use Redis in production) |
 | `TRUST_PROXY` | Set to `1` only when running behind Nginx, so Flask trusts `X-Forwarded-*` (HTTPS in OAuth redirects and `og:url`) |
+| `SITE_URL` | Public origin, e.g. `https://coi-planner.com`. Used for absolute URLs in `sitemap.xml` and canonical tags — **set it in production**, or the sitemap will point at the internal host over `http` and search engines will ignore it |
 
 See `.env.example` for the annotated, complete list.
 

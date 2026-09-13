@@ -291,6 +291,16 @@ if os.environ.get("TRUST_PROXY") == "1":
 init_oauth(app)
 app.register_blueprint(auth_bp)
 
+# Серверные страницы справочника + robots.txt/sitemap.xml (SEO-слой)
+from seo import (seo_bp, item_url as _seo_item_url,
+                 building_url as _seo_building_url, content_counts as _content_counts)
+
+app.register_blueprint(seo_bp)
+app.jinja_env.globals["seo_item_url"]     = _seo_item_url
+app.jinja_env.globals["seo_building_url"] = _seo_building_url
+app.jinja_env.globals["loc_name"] = \
+    lambda name: (getattr(g, "content_trans", None) or {}).get(name, name)
+
 # ── Rate limiting (Flask-Limiter) ──────────────────────────────
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -302,6 +312,10 @@ limiter = Limiter(
     storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
 )
 # Лимиты на auth-роуты (blueprint зарегистрирован выше)
+# Справочник обходят краулеры: сотни страниц подряд. Дефолтные 200/мин отдали бы
+# Googlebot пачку 429, а это режет скорость обхода. Свой щедрый лимит вместо дефолта.
+limiter.limit("600 per minute")(seo_bp)
+
 limiter.limit("5 per hour")(app.view_functions["auth.email_send"])
 limiter.limit("10 per hour")(app.view_functions["auth.email_verify"])
 limiter.limit("10 per hour")(app.view_functions["auth.login_with_code"])
@@ -317,6 +331,38 @@ GUEST_GLOBAL_CAP    = int(os.environ.get("GUEST_GLOBAL_COMPLEX_CAP", "5000"))
 # Гостевые сессии
 GUEST_COOKIE      = "coi_guest"
 GUEST_COOKIE_AGE  = 365 * 24 * 3600  # 1 год
+
+# Псевдопользователь для краулеров: не пишется в users, id=None.
+# Запросы вида «WHERE user_id = NULL» не находят ничего — это и нужно.
+ANON_USER = {
+    "id":           None,
+    "display_name": "Crawler",
+    "avatar_url":   None,
+    "email":        None,
+    "is_premium":   False,
+    "is_guest":     True,
+}
+
+# «bot» как подстрока задевает настоящие устройства (Android CUBOT_X30), а ложное
+# срабатывание стоит дорого: живой игрок остался бы без гостевой записи и не смог
+# бы ничего сохранить. Поэтому «bot» — только с разделителем после (Googlebot/2.1).
+_CRAWLER_UA_RE = re.compile(
+    r"bot[/;)\s]|bot$|crawler|spider|slurp|"
+    r"facebookexternalhit|embedly|whatsapp|telegrambot|skypeuripreview|"
+    r"lighthouse|pingdom|"
+    r"curl/|wget/|python-requests|python-httpx|go-http-client|okhttp|"
+    r"headlesschrome|phantomjs",
+    re.IGNORECASE,
+)
+
+
+def _is_crawler() -> bool:
+    """Поисковый робот или превью-краулер: гостевую запись для него не создаём.
+
+    Боты не хранят cookie, поэтому каждая страница обхода заводила бы нового
+    гостя — при 350 страницах справочника это мусор в users на каждый обход.
+    """
+    return bool(_CRAWLER_UA_RE.search(request.headers.get("User-Agent", "")))
 
 
 def _err500(e: Exception):
@@ -340,10 +386,14 @@ def before_request():
         cookie_val = request.cookies.get(GUEST_COOKIE)
         if cookie_val:
             g.user = load_guest_by_cookie(cookie_val)
-        if not g.get("user"):
+        if not g.get("user") and not _is_crawler():
             # Новый посетитель: создаём гостя (с источником перехода) и запоминаем cookie
             g.user, g._new_guest_cookie = create_guest_user(
                 request.args.get("utm_source"), request.referrer)
+        if not g.get("user"):
+            # Краулер: работаем без записи в users — иначе каждая страница
+            # обхода плодит гостя (боты не хранят cookie).
+            g.user = ANON_USER
 
     # ?lang= query param — наивысший приоритет (для кнопки смены языка)
     lang_qp = request.args.get("lang")
@@ -886,7 +936,8 @@ def _parse_row(row: dict) -> dict:
 
 @app.route("/")
 def index():
-    return render_template("index.html", user=g.get("user"))
+    # counts — для серверного текста на главной: числа в лендинге должны быть настоящими
+    return render_template("index.html", user=g.get("user"), counts=_content_counts())
 
 
 @app.route("/privacy")
