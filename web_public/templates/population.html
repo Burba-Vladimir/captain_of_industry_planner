@@ -32,6 +32,14 @@
     </span>
     <div class="flex-1"></div>
 
+    <!-- Справка и обучающий тур -->
+    <button data-tour="help" @click="$dispatch('coi-help')"
+            title="{{ t('tour.help_btn') }}"
+            class="shrink-0 w-8 h-8 rounded-lg border border-slate-200 dark:border-slate-600
+                   flex items-center justify-center text-sm font-bold
+                   text-slate-500 dark:text-slate-400
+                   hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">?</button>
+
     <!-- Тема: как и везде, хранится в localStorage и не перезагружает страницу -->
     <button @click="toggleTheme()"
             class="shrink-0 w-8 h-8 rounded-lg border border-slate-200 dark:border-slate-600
@@ -63,7 +71,8 @@
 <div class="max-w-screen-2xl mx-auto px-4 py-4 grid grid-cols-1 lg:grid-cols-[17rem_1fr] gap-4 items-start">
 
   <!-- ── ЛЕВАЯ ПАНЕЛЬ ────────────────────────────────────────────────── -->
-  <aside class="lg:sticky lg:top-16 bg-white dark:bg-slate-800 rounded-xl border border-slate-200
+  <aside data-tour="pop-params"
+         class="lg:sticky lg:top-16 bg-white dark:bg-slate-800 rounded-xl border border-slate-200
                 dark:border-slate-700 p-4 space-y-5 max-h-[calc(100vh-5rem)] overflow-y-auto">
 
     <div>
@@ -222,11 +231,13 @@
            границу раздела и оказалось бы обрезано. Углы шапке скругляем
            отдельно, иначе её фон вылезал бы за скруглённую рамку. -->
       <section x-show="!loading && sec.filled"
+               :data-tour="sec.key === 'outputs' ? 'pop-outputs' : null"
                class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200
                       dark:border-slate-700"
                :class="dragKey === sec.key ? 'ring-2 ring-blue-400 opacity-60' : ''"
                @dragover.prevent="overSection(sec.key)" @drop.prevent>
-        <div class="px-4 py-2 bg-slate-100 dark:bg-slate-700/50 border-b border-slate-200
+        <div :data-tour="sec.key === 'grown' ? 'pop-sechead' : null"
+             class="px-4 py-2 bg-slate-100 dark:bg-slate-700/50 border-b border-slate-200
                     dark:border-slate-700 text-sm font-semibold flex items-center gap-2
                     select-none cursor-move"
              :class="collapsed[sec.key] ? 'rounded-xl' : 'rounded-t-xl'"
@@ -318,7 +329,7 @@
                     <template x-if="forkKinds(r).length > 1">
                       <div class="relative" @click.outside="closePickerFor(r)">
                         <div x-html="forkBuildingCell(r)"></div>
-                        <button type="button" @click="togglePicker(r)"
+                        <button type="button" @click="togglePicker(r)" data-tour="pop-fork"
                                 class="mt-0.5 w-full max-w-72 flex items-center gap-2 px-2 py-1 rounded
                                        border border-slate-300 dark:border-slate-600
                                        bg-white dark:bg-slate-700 text-sm text-left
@@ -486,7 +497,7 @@
                       x-text="'{{ t('population.fields_min_note') }}'.replace('{n}', farmLayout.min)"></span>
               </div>
 
-              <div class="space-y-1">
+              <div data-tour="pop-fields" class="space-y-1">
                 <template x-for="g in farmLayout.groups" :key="g.key">
                   <div class="flex items-start gap-3 px-2 py-1.5 rounded-lg border
                               border-slate-200 dark:border-slate-600">
@@ -512,7 +523,7 @@
                 </template>
               </div>
 
-              <div class="overflow-x-auto">
+              <div data-tour="pop-cover" class="overflow-x-auto">
                 <table class="text-sm w-full max-w-3xl">
                   <thead class="text-xs text-slate-500 dark:text-slate-400">
                     <tr>
@@ -613,7 +624,7 @@
 
               <!-- Переработка. Режем по производимому, а не по сырью: важно,
                    сколько строить биореакторов и смесителей. -->
-              <div x-show="recycling.length" class="space-y-2 pt-1">
+              <div data-tour="pop-recycle" x-show="recycling.length" class="space-y-2 pt-1">
                 <div class="text-xs font-semibold uppercase tracking-wide
                             text-slate-500 dark:text-slate-400">
                   {{ t('population.recycling') }}
@@ -3251,5 +3262,8 @@ function populationCalc() {
   };
 }
 </script>
+{% set tour_page = 'needs' %}
+{% include '_tour.html' %}
+
 </body>
 </html>

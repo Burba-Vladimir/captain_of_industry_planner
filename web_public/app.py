@@ -436,8 +436,16 @@ def inject_template_globals():
     theme = getattr(g, "theme", "light")
     i18n  = _translations.get(lang) or _translations.get("en", {})
     user  = g.get("user")
+    # Пройденные туры: у авторизованных берём с сервера, чтобы гайд не
+    # выскакивал заново на другом устройстве. Гостям хватает localStorage.
+    tour_seen = ""
+    if user and not user.get("is_guest"):
+        try:
+            tour_seen = _get_user_setting(user["id"], "tour_seen") or ""
+        except Exception:
+            tour_seen = ""
     return {
-        "lang": lang, "theme": theme, "i18n": i18n, "user": user,
+        "lang": lang, "theme": theme, "i18n": i18n, "user": user, "tour_seen": tour_seen,
         "google_enabled": GOOGLE_ENABLED, "steam_enabled": STEAM_ENABLED,
         "donate_lava_url": DONATE_LAVA_URL, "donate_boosty_url": DONATE_BOOSTY_URL,
     }
@@ -497,7 +505,9 @@ def api_settings():
     data = request.get_json(silent=True) or {}
     # population_prefs — выбранные рецепты, уровни зданий и население
     # на странице нужд поселения. Хранится JSON-строкой.
-    allowed = {"ui_language", "ui_theme", "show_public_complexes", "population_prefs"}
+    # tour_seen — какие обучающие туры пользователь уже прошёл, через запятую.
+    allowed = {"ui_language", "ui_theme", "show_public_complexes", "population_prefs",
+               "tour_seen"}
     for key, value in data.items():
         if key in allowed:
             _set_user_setting(g.user["id"], key, str(value))
@@ -892,6 +902,34 @@ def about():
 @app.route("/population")
 def population():
     return render_template("population.html", user=g.get("user"))
+
+
+# Демо-комплекс для обучающего тура по редактору: на пустом холсте
+# показывать нечего. Слаг можно закрепить через .env, иначе берём самый
+# популярный публичный комплекс — он всегда есть и не требует ухода.
+TOUR_DEMO_SLUG = os.environ.get("TOUR_DEMO_SLUG", "")
+
+
+@app.route("/tour/editor")
+def tour_editor():
+    slug = TOUR_DEMO_SLUG
+    if not slug:
+        try:
+            with get_db() as con:
+                with con.cursor() as cur:
+                    cur.execute("""
+                        SELECT slug FROM complexes
+                        WHERE visibility = 'public' AND is_ghost = FALSE
+                        ORDER BY likes_count DESC, id DESC
+                        LIMIT 1
+                    """)
+                    row = cur.fetchone()
+            slug = row[0] if row else ""
+        except Exception:
+            slug = ""
+    if not slug:
+        return redirect(url_for("index"))
+    return redirect(url_for("complex_view", slug=slug) + "?tour=editor")
 
 
 @app.route("/complex/new")

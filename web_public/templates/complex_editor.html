@@ -341,7 +341,7 @@
       </div>
 
       <!-- Save (остаёмся в редакторе) -->
-      <button @click="save(false)"
+      <button @click="save(false)" data-tour="ed-save"
               :disabled="saving || !name.trim()"
               class="px-4 py-1.5 border border-blue-600 text-blue-600 dark:text-blue-400 text-sm font-medium rounded-lg
                      hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
@@ -401,7 +401,7 @@
 
       <!-- Fork button -->
       {% if user %}
-      <button @click="fork()"
+      <button @click="fork()" data-tour="ed-fork"
               class="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg
                      hover:bg-blue-700 transition-colors flex items-center gap-1.5">
         <svg viewBox="0 0 20 20" fill="none" class="w-4 h-4 shrink-0">
@@ -412,6 +412,14 @@
       </button>
       {% endif %}
       {% endif %}
+
+      <!-- Справка и обучающий тур -->
+      <button data-tour="help" @click="$dispatch('coi-help')"
+              title="{{ t('tour.help_btn') }}"
+              class="shrink-0 w-8 h-8 rounded-lg border border-slate-200 dark:border-slate-600
+                     flex items-center justify-center text-sm font-bold
+                     text-slate-500 dark:text-slate-400
+                     hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">?</button>
 
       <!-- Theme toggle (localStorage) -->
       <button @click="toggleTheme()"
@@ -454,7 +462,7 @@
 
 <!-- ═══════════ CANVAS SCROLL AREA ═══════════ -->
 <div x-show="!loading && !error"
-     id="canvas-scroll"
+     id="canvas-scroll" data-tour="ed-canvas"
      class="flex-1 relative"
      style="overflow:auto; padding-bottom:48px">
 
@@ -478,7 +486,7 @@
 
     <!-- ── NODE TILES ── -->
     <template x-for="node in nodes" :key="node._id">
-      <div class="node-tile"
+      <div class="node-tile" data-tour="ed-node"
            :data-nid="node._id"
            :class="(node.node_type==='complex'?'is-complex ':'')+(selected[node._id]?'is-selected':'')"
            :style="`left:${nodePositions[node._id]?.x??node.pos_x}px; top:${nodePositions[node._id]?.y??node.pos_y}px`">
@@ -535,7 +543,7 @@
           <div class="ports-col inputs">
             <template x-for="(inp, idx) in scaledFlows(node,'input')" :key="inp.item">
               <div class="port-row">
-                <button class="port-btn"
+                <button class="port-btn" data-tour="ed-port"
                         :class="portBalance(node, inp.item, 'input')"
                         :title="'{{ t('editor.producers') }}: ' + (inp.item_display||inp.item)"
                         @click.stop="openPicker(node, inp.item, 'produces')"
@@ -775,7 +783,7 @@
 </div>
 
 <!-- ═══════════ SUMMARY BAR ═══════════ -->
-<div id="summary-bar" x-show="!loading && !error">
+<div id="summary-bar" data-tour="ed-summary" x-show="!loading && !error">
   <span class="text-slate-400 font-medium mr-2">{{ t('editor.total') }}</span>
   <span x-show="summary.totalWorkers>0" class="bg-slate-700 rounded px-2 py-0.5">
     👷 <span x-text="Math.round(summary.totalWorkers)"></span>
@@ -2954,5 +2962,8 @@ function complexEditor(complexId, readOnlyMode) {
     </button>
   </div>
 </div>
+{% set tour_page = 'editor' %}
+{% include '_tour.html' %}
+
 </body>
 </html>

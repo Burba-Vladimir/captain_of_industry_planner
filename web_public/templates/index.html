@@ -106,7 +106,8 @@
     </span>
 
     <!-- Tab nav: только Рецепты и Сообщество -->
-    <div class="flex rounded-lg border border-slate-200 dark:border-slate-600 text-sm overflow-hidden shrink-0">
+    <div data-tour="nav"
+         class="flex rounded-lg border border-slate-200 dark:border-slate-600 text-sm overflow-hidden shrink-0">
       <button @click="setTab('browse')"
               :class="tab==='browse' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600'"
               class="px-3 py-1.5 transition-colors">{{ t('nav.recipes') }}</button>
@@ -122,7 +123,7 @@
     </div>
 
     <!-- Search (browse) -->
-    <div class="flex-1 min-w-32 max-w-sm relative" x-show="tab==='browse'">
+    <div data-tour="search" class="flex-1 min-w-32 max-w-sm relative" x-show="tab==='browse'">
       <input type="search"
              x-model.debounce.300="q"
              @input.debounce.300="page=1; loadBrowse()"
@@ -148,6 +149,14 @@
               class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">✕</button>
     </div>
 
+
+    <!-- Справка и обучающий тур -->
+    <button data-tour="help" @click="$dispatch('coi-help')"
+            title="{{ t('tour.help_btn') }}"
+            class="shrink-0 w-8 h-8 rounded-lg border border-slate-200 dark:border-slate-600
+                   flex items-center justify-center text-sm font-bold
+                   text-slate-500 dark:text-slate-400
+                   hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">?</button>
 
     <!-- Theme toggle (localStorage-based, no page reload) -->
     <button @click="toggleTheme()"
@@ -236,7 +245,7 @@
   <div x-show="tab==='browse'">
 
     <!-- Filters row -->
-    <div class="flex flex-wrap items-center gap-2 mb-3">
+    <div data-tour="filters" class="flex flex-wrap items-center gap-2 mb-3">
       <div class="flex rounded-lg border border-slate-300 dark:border-slate-600 text-sm overflow-hidden">
         <template x-for="tp in [{v:'all',l:'{{ t('browse.all') }}'},{v:'recipe',l:'{{ t('browse.recipes') }}'},{v:'complex',l:'{{ t('browse.complexes') }}'}]" :key="tp.v">
           <button @click="type=tp.v; page=1; loadBrowse()"
@@ -314,7 +323,7 @@
           <tbody :class="[node.deprecated ? 'opacity-40' : '', i%2===0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50/60 dark:bg-slate-700/20']">
 
             <!-- Main row -->
-            <tr @click="toggle(node)"
+            <tr data-tour="row" @click="toggle(node)"
                 class="border-b border-slate-100 dark:border-slate-700 cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/20">
 
               <td class="px-3 py-2" @click.stop>
@@ -437,7 +446,7 @@
               </td>
               <td class="px-2 py-2 text-center whitespace-nowrap" @click.stop>
                 <!-- Создать комплекс на основе рецепта -->
-                <a x-show="node.node_type==='recipe'"
+                <a data-tour="newcx" x-show="node.node_type==='recipe'"
                    :href="'/complex/new?from_type=recipe&from_id=' + node.node_id + '&back=' + encodeURIComponent(location.pathname+location.search)"
                    class="new-cx-btn relative overflow-hidden inline-flex items-center justify-center w-6 h-6 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800/60 hover:scale-110 transition-all"
                    :title="'{{ t('browse.new_from_recipe') }}'">
@@ -1082,7 +1091,7 @@
 
 
 <!-- ═══════════ BATCH ACTION BAR ═══════════ -->
-<div x-show="tab==='browse' && selected.size > 0"
+<div data-tour="selbar" x-show="tab==='browse' && selected.size > 0"
      x-transition:enter="transition ease-out duration-200"
      x-transition:enter-start="opacity-0 translate-y-4"
      x-transition:enter-end="opacity-100 translate-y-0"
@@ -1853,5 +1862,8 @@ function app() {
     wave();
   })();
 </script>
+{% set tour_page = 'browse' %}
+{% include '_tour.html' %}
+
 </body>
 </html>
