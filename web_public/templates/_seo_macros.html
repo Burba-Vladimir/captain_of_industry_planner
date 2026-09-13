@@ -1,0 +1,90 @@
+{# Общие макросы серверных страниц справочника. #}
+
+{% macro icon_img(item_en, size) %}
+<img src="/static/icons/{{ item_en|replace(' ', '_') }}.png" alt=""
+     class="{{ size }} shrink-0" loading="lazy" onerror="this.remove()">
+{% endmacro %}
+
+
+{# Строка «иконка — имя со ссылкой — число». field: 'qty' | 'rate_per_min' #}
+{% macro qty_list(entries, field) %}
+<ul class="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+  {% for e in entries %}
+  {% set url = seo_item_url(e.item) %}
+  <li class="flex items-center gap-1.5">
+    {{ icon_img(e.item, 'w-4 h-4') }}
+    {% if url %}<a href="{{ url }}" class="hover:underline">{{ loc_name(e.item) }}</a>
+    {% else %}{{ loc_name(e.item) }}{% endif %}
+    <span class="text-slate-500 dark:text-slate-400 tabular-nums">
+      {% if field == 'qty' %}×{{ '%g'|format(e.qty|float) }}
+      {% else %}{{ '%g'|format(e.rate_per_min|float) }}/{{ t('seo.min') }}{% endif %}
+    </span>
+  </li>
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+
+{% macro flow_list(entries, highlight_en) %}
+  {% if entries %}
+  <ul class="space-y-0.5">
+    {% for e in entries %}
+    {% set url = seo_item_url(e.item) %}
+    <li class="flex items-center gap-1.5 whitespace-nowrap
+               {{ 'font-semibold text-blue-700 dark:text-blue-300' if highlight_en and e.item == highlight_en else '' }}">
+      {{ icon_img(e.item, 'w-4 h-4') }}
+      {% if url %}<a href="{{ url }}" class="hover:underline">{{ loc_name(e.item) }}</a>
+      {% else %}{{ loc_name(e.item) }}{% endif %}
+      <span class="text-slate-500 dark:text-slate-400 tabular-nums">
+        {{ '%g'|format(e.qty_per_min|float) }}/{{ t('seo.min') }}
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <span class="text-slate-400">—</span>
+  {% endif %}
+{% endmacro %}
+
+
+{# rows — список рецептов; show_machine=False на странице здания (машина там одна) #}
+{% macro recipe_table(rows, highlight_en, show_machine=True) %}
+<div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+  <table class="w-full text-sm">
+    <thead class="bg-slate-100 dark:bg-slate-800 text-left">
+      <tr>
+        {% if show_machine %}<th class="px-3 py-2 font-medium">{{ t('seo.col_machine') }}</th>{% endif %}
+        <th class="px-3 py-2 font-medium">{{ t('browse.col_inputs') }}</th>
+        <th class="px-3 py-2 font-medium">{{ t('browse.col_outputs') }}</th>
+        <th class="px-3 py-2 font-medium text-right">{{ t('seo.col_workers') }}</th>
+        <th class="px-3 py-2 font-medium text-right">{{ t('seo.col_power') }}</th>
+        <th class="px-3 py-2 font-medium text-right">{{ t('seo.col_cycle') }}</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-200 dark:divide-slate-700">
+      {% for r in rows %}
+      <tr class="align-top {{ 'opacity-60' if r.deprecated else '' }}">
+        {% if show_machine %}
+        {% set burl = seo_building_url(r.machine_name) %}
+        <td class="px-3 py-2 whitespace-nowrap">
+          {% if burl %}<a href="{{ burl }}" class="font-medium hover:underline">{{ loc_name(r.machine_name) }}</a>
+          {% else %}<span class="font-medium">{{ loc_name(r.machine_name) }}</span>{% endif %}
+          {% if r.deprecated %}
+          <span class="ml-1 text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400">
+            {{ t('seo.deprecated') }}</span>
+          {% endif %}
+        </td>
+        {% endif %}
+        <td class="px-3 py-2">{{ flow_list(r.inputs,  highlight_en) }}</td>
+        <td class="px-3 py-2">{{ flow_list(r.outputs, highlight_en) }}</td>
+        <td class="px-3 py-2 text-right tabular-nums">{{ r.workers if r.workers is not none else '—' }}</td>
+        <td class="px-3 py-2 text-right tabular-nums">
+          {{ ('%g'|format(r.electricity_kw|float) ~ ' ' ~ t('seo.kw')) if r.electricity_kw else '—' }}</td>
+        <td class="px-3 py-2 text-right tabular-nums">
+          {{ ('%g'|format(r.cycle_time_s|float) ~ ' ' ~ t('seo.sec')) if r.cycle_time_s else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}

@@ -1,0 +1,79 @@
+{% extends "seo_base.html" %}
+{% import "_seo_macros.html" as m %}
+
+{% block page_title %}{{ t('seo.building_title', name=display) }}{% endblock %}
+{% block page_desc %}{{ t('seo.building_desc', name=display, n=recipes|length) }}{% endblock %}
+
+{% block breadcrumbs %}
+<nav class="text-xs text-slate-500 dark:text-slate-400 mb-4">
+  <a href="/" class="hover:underline">CoI Planner</a>
+  <span class="mx-1">/</span>
+  <a href="/buildings" class="hover:underline">{{ t('seo.nav_buildings') }}</a>
+  <span class="mx-1">/</span>
+  <span class="text-slate-700 dark:text-slate-200">{{ display }}</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="flex items-center gap-3 mb-2">
+  <img src="/static/icons/{{ icon }}" alt="{{ display }}" class="w-10 h-10" onerror="this.remove()">
+  <h1 class="text-2xl sm:text-3xl font-bold">{{ t('seo.building_h1', name=display) }}</h1>
+</div>
+
+<p class="text-slate-600 dark:text-slate-300 mb-6 max-w-3xl">
+  {{ t('seo.building_intro', name=display, n=recipes|length) }}
+</p>
+
+<section class="mb-8">
+  <h2 class="text-lg font-semibold mb-3">{{ t('seo.specs') }}</h2>
+  {% set cells = [
+    (t('seo.col_workers'),      b.workers if b.workers is not none else '—'),
+    (t('seo.col_power'),        ('%g'|format(b.electricity_kw|float) ~ ' ' ~ t('seo.kw')) if b.electricity_kw else '—'),
+    (t('browse.col_computing'), ('%g'|format(b.computing_tf|float) ~ ' ' ~ t('browse.tf_unit')) if b.computing_tf else '—'),
+    (t('seo.footprint'),        b.footprint or '—'),
+    (t('seo.category'),         b.designation or '—')
+  ] %}
+  <dl class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+    {% for label, value in cells %}
+    <div class="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
+      <dt class="text-xs text-slate-500 dark:text-slate-400">{{ label }}</dt>
+      <dd class="font-semibold tabular-nums">{{ value }}</dd>
+    </div>
+    {% endfor %}
+  </dl>
+</section>
+
+{% if b.construction %}
+<section class="mb-8">
+  <h2 class="text-lg font-semibold mb-3">{{ t('browse.col_construction') }}</h2>
+  {{ m.qty_list(b.construction, 'qty') }}
+</section>
+{% endif %}
+
+{% if b.maintenance %}
+<section class="mb-8">
+  <h2 class="text-lg font-semibold mb-3">{{ t('browse.col_maint') }}</h2>
+  {{ m.qty_list(b.maintenance, 'rate_per_min') }}
+</section>
+{% endif %}
+
+<section class="mb-8">
+  <h2 class="text-lg font-semibold mb-3">{{ t('seo.recipes_of', name=display) }}</h2>
+  {% if recipes %}
+    {{ m.recipe_table(recipes, None, False) }}
+  {% else %}
+    <p class="text-slate-500 dark:text-slate-400 text-sm">{{ t('seo.no_recipes') }}</p>
+  {% endif %}
+</section>
+
+<aside class="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 p-4">
+  <h2 class="font-semibold mb-1">{{ t('seo.cta_title', name=display) }}</h2>
+  <p class="text-sm text-slate-600 dark:text-slate-300 mb-3">{{ t('seo.cta_body') }}</p>
+  {# То же, что на странице ресурса: локализованное имя и обязательные кавычки —
+     без них «Alloy Mixer» распалось бы на name:alloy и отдельное слово mixer. #}
+  <a href="/?q={{ ('name:\"' ~ display ~ '\"')|urlencode }}"
+     class="inline-block px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium">
+    {{ t('seo.cta_button', name=display) }}
+  </a>
+</aside>
+{% endblock %}

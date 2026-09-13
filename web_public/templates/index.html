@@ -241,6 +241,42 @@
 <!-- ═══════════ MAIN ═══════════ -->
 <main class="max-w-screen-xl mx-auto px-4 py-5 pb-24">
 
+  <!-- ── Intro ────────────────────────────────────────────────────────
+       Серверный текст: до этого блока краулер и первый посетитель видели
+       на главной только шапку. Свернувшего блок запоминаем в localStorage.
+  -->
+  <section x-data="{ open: localStorage.getItem('coi_intro_hidden') !== '1' }"
+           x-show="open" x-cloak
+           class="mb-5 rounded-xl border border-slate-200 dark:border-slate-700
+                  bg-white dark:bg-slate-800 px-4 py-3">
+    <div class="flex items-start gap-3">
+      <div class="min-w-0">
+        <h1 class="text-lg font-bold mb-1">{{ t('landing.h1') }}</h1>
+        <p class="text-sm text-slate-600 dark:text-slate-300 max-w-3xl leading-relaxed">
+          {{ t('landing.lead') }}
+        </p>
+        <p class="text-sm text-slate-600 dark:text-slate-300 max-w-3xl leading-relaxed mt-1">
+          {# counts['items'], не counts.items: у dict есть метод .items() и Jinja возьмёт его #}
+          {{ t('landing.data', recipes=counts['recipes'],
+                               buildings=counts['buildings'],
+                               items=counts['items']) }}
+        </p>
+        <p class="mt-2 text-sm flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span class="text-slate-500 dark:text-slate-400">{{ t('landing.explore') }}</span>
+          <a href="/items"      class="text-blue-600 dark:text-blue-400 hover:underline">{{ t('seo.nav_items') }}</a>
+          <a href="/buildings"  class="text-blue-600 dark:text-blue-400 hover:underline">{{ t('seo.nav_buildings') }}</a>
+          <a href="/population" class="text-blue-600 dark:text-blue-400 hover:underline">{{ t('nav.needs') }}</a>
+          <a href="/about"      class="text-blue-600 dark:text-blue-400 hover:underline">{{ t('nav.about') }}</a>
+        </p>
+      </div>
+      <button @click="open = false; localStorage.setItem('coi_intro_hidden', '1')"
+              class="ml-auto shrink-0 w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600
+                     dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700
+                     transition-colors text-lg leading-none"
+              :title="'{{ t('landing.hide') }}'">&times;</button>
+    </div>
+  </section>
+
   <!-- ─── BROWSE TAB ─── -->
   <div x-show="tab==='browse'">
 
@@ -1805,6 +1841,13 @@ function app() {
 <!-- ── Micro-footer ────────────────────────────────────────────────── -->
 <footer class="text-center text-xs text-slate-500 dark:text-slate-600 py-3">
   &copy; 2026 CoI Planner &nbsp;&middot;&nbsp;
+  {# Ссылки на серверный справочник: точка входа для поисковиков и для игроков #}
+  <a href="/items" class="hover:text-slate-400 dark:hover:text-slate-400 hover:underline">{{ t('seo.nav_items') }}</a>
+  &nbsp;&middot;&nbsp;
+  <a href="/buildings" class="hover:text-slate-400 dark:hover:text-slate-400 hover:underline">{{ t('seo.nav_buildings') }}</a>
+  &nbsp;&middot;&nbsp;
+  <a href="/about" class="hover:text-slate-400 dark:hover:text-slate-400 hover:underline">{{ t('nav.about') }}</a>
+  &nbsp;&middot;&nbsp;
   <a href="/privacy" class="hover:text-slate-400 dark:hover:text-slate-400 hover:underline">{{ t('cookie.privacy_link') }}</a>
 </footer>
 
