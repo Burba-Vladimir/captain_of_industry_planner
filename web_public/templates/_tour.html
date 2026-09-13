@@ -1,0 +1,417 @@
+<!-- ═══════════════════════════════════════════════════════════════════
+     Обучающий гайд: приветствие, пошаговый тур, справка.
+
+     Подключается в конце <body>. Страница объявляет себя, задав
+     tour_page перед include, — от этого зависит, какой набор шагов
+     доступен. (Тег set здесь не пишем: HTML-комментарий Jinja не
+     останавливает, и такая «документация» выполнилась бы.)
+
+     Шаги привязаны к data-tour в разметке. Если элемента на странице
+     нет (гость, другая вкладка, пустой каталог) — шаг молча
+     пропускается: гайд не должен ломаться от состояния страницы.
+     ═══════════════════════════════════════════════════════════════ -->
+
+<style>
+  .tour-card code { font-size: .78rem; padding: 1px 4px; border-radius: 4px;
+                    background: rgb(241 245 249); color: rgb(109 40 217);
+                    white-space: nowrap; }
+  .dark .tour-card code { background: rgb(51 65 85); color: rgb(196 181 253); }
+</style>
+
+<div x-data="coiTour('{{ tour_page|default('') }}')" x-cloak
+     @coi-help.window="help = true"
+     @coi-tour.window="start($event.detail && $event.detail.id)"
+     @keydown.escape.window="onEsc()"
+     @keydown.arrow-right.window="if (active) next()"
+     @keydown.arrow-left.window="if (active) prev()"
+     @resize.window="measure()"
+     @scroll.window="measure()">
+
+  <!-- ─── Подсветка: рамка вокруг элемента и затемнение всего прочего ─── -->
+  <div x-show="active">
+    <!-- Ловим клики, чтобы во время тура не увести пользователя со страницы -->
+    <div class="fixed inset-0 z-[60]"></div>
+    <div class="fixed rounded-lg pointer-events-none z-[61] transition-all duration-200"
+         :style="'top:' + box.t + 'px; left:' + box.l + 'px; width:' + box.w + 'px; height:' + box.h + 'px;'
+                 + 'box-shadow: 0 0 0 9999px rgba(15,23,42,.62); outline: 2px solid rgb(59 130 246);'
+                 + 'outline-offset: 2px;'"></div>
+  </div>
+
+  <!-- ─── Карточка шага ─── -->
+  <div x-show="active">
+    <div x-ref="card"
+         class="tour-card fixed z-[62] w-[min(340px,calc(100vw-24px))] p-4 rounded-xl shadow-2xl
+                bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+         :style="'top:' + card.t + 'px; left:' + card.l + 'px;'">
+      <p class="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-1"
+         x-text="txt('t')"></p>
+      <p class="text-sm leading-relaxed text-slate-600 dark:text-slate-300"
+         x-html="txt('b')"></p>
+      <div class="flex items-center gap-2 mt-4">
+        <span class="text-xs text-slate-400 dark:text-slate-500 tabular-nums"
+              x-text="counter()"></span>
+        <button @click="stop()"
+                class="ml-auto text-xs text-slate-400 hover:text-slate-600
+                       dark:hover:text-slate-200 transition-colors px-1">
+          {{ t('tour.skip') }}
+        </button>
+        <button @click="prev()" x-show="i > 0"
+                class="px-2.5 py-1 text-sm rounded-lg border border-slate-300 dark:border-slate-600
+                       text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700
+                       transition-colors">
+          {{ t('tour.back') }}
+        </button>
+        <button @click="next()" data-tour-ui="next"
+                class="px-3 py-1 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white
+                       font-medium transition-colors">
+          <span x-text="isLast() ? '{{ t('tour.done') }}' : '{{ t('tour.next') }}'"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Приветствие: показывается один раз, при первом заходе ─── -->
+  <div x-show="welcome" x-transition.opacity
+       class="fixed inset-0 z-[65] bg-slate-900/60 flex items-center justify-center p-4"
+       @click.self="closeWelcome()">
+    <div class="w-full max-w-lg rounded-2xl shadow-2xl p-6
+                bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+      <h2 class="text-lg font-bold text-slate-800 dark:text-slate-100">{{ t('tour.welcome_title') }}</h2>
+      <p class="text-sm text-slate-600 dark:text-slate-300 mt-1">{{ t('tour.welcome_body') }}</p>
+
+      <div class="grid gap-2 mt-4">
+        {% for icon, tk, bk in [
+          ('📚', 'welcome_recipes',   'welcome_recipes_b'),
+          ('👥', 'welcome_community', 'welcome_community_b'),
+          ('🏘', 'welcome_needs',     'welcome_needs_b')
+        ] %}
+        <div class="flex items-start gap-3 rounded-xl p-3
+                    bg-slate-50 dark:bg-slate-700/40 border border-slate-100 dark:border-slate-700">
+          <span class="text-xl leading-none mt-0.5">{{ icon }}</span>
+          <div>
+            <p class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ t('tour.' + tk + '_t') }}</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{{ t('tour.' + bk) }}</p>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="flex items-center gap-2 mt-5">
+        <button @click="closeWelcome()"
+                class="text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700
+                       dark:hover:text-slate-200 transition-colors px-2 py-1.5">
+          {{ t('tour.welcome_skip') }}
+        </button>
+        <button @click="closeWelcome(); start()"
+                class="ml-auto px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white
+                       text-sm font-medium transition-colors">
+          {{ t('tour.welcome_start') }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Справка: запуск тура и шпаргалка по поиску ─── -->
+  <div x-show="help" x-transition.opacity
+       class="fixed inset-0 z-[65] bg-slate-900/60 flex items-start justify-center p-4 overflow-y-auto"
+       @click.self="help = false">
+    <div class="w-full max-w-xl my-10 rounded-2xl shadow-2xl
+                bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+      <div class="flex items-center gap-2 px-5 py-3 border-b border-slate-100 dark:border-slate-700">
+        <h2 class="text-base font-bold text-slate-800 dark:text-slate-100">{{ t('tour.help_title') }}</h2>
+        <button @click="help = false"
+                class="ml-auto w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600
+                       dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700
+                       transition-colors">✕</button>
+      </div>
+
+      <div class="p-5 space-y-5">
+        <div>
+          <button x-show="hasTour()" @click="help = false; start()" data-tour-ui="start"
+                  class="w-full px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white
+                         text-sm font-medium transition-colors text-left">
+            {{ t('tour.help_tour') }}
+          </button>
+          <p x-show="!hasTour()" class="text-sm text-slate-500 dark:text-slate-400">
+            {{ t('tour.help_tour_none') }}
+          </p>
+        </div>
+
+        <div x-show="page === 'browse'">
+          <p class="text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-2">
+            {{ t('tour.cheat_title') }}
+          </p>
+          <div class="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+            {% for key in ['in', 'out', 'name', 'by', 'tag', 'and', 'or', 'group', 'quote', 'plain'] %}
+            <div class="flex items-baseline gap-3 px-3 py-1.5 text-sm
+                        border-b border-slate-100 dark:border-slate-700 last:border-0">
+              <code class="shrink-0 font-mono text-xs px-1.5 py-0.5 rounded
+                           bg-slate-100 dark:bg-slate-700 text-violet-700 dark:text-violet-300
+                           whitespace-nowrap">{{ t('tour.cheat_' + key + '_ex') }}</code>
+              <span class="text-slate-600 dark:text-slate-300">{{ t('tour.cheat_' + key) }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <a x-show="page === 'editor'" href="/tour/editor"
+           class="block w-full px-4 py-2.5 rounded-xl text-sm font-medium text-left
+                  border border-slate-300 dark:border-slate-600
+                  text-slate-700 dark:text-slate-200
+                  hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+          {{ t('tour.help_demo') }}
+        </a>
+
+        <a href="/about"
+           class="inline-block text-sm text-blue-600 dark:text-blue-400 hover:underline">
+          {{ t('tour.help_about') }} →
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* Список пройденного, сохранённый на сервере (для авторизованных). */
+  window._coiTourSeen = {{ (tour_seen or '') | tojson }};
+
+  /* Гайд подключается и к страницам, где своего клиентского словаря нет
+     («Поселение» переводится только на сервере) — поэтому объявляем свой. */
+  window._i18n = window._i18n || {{ i18n | tojson }};
+  if (typeof window.jt !== 'function') {
+    window.jt = function (key, vars) {
+      let v = window._i18n;
+      for (const part of key.split('.')) {
+        if (v && typeof v === 'object') v = v[part]; else return key;
+      }
+      if (typeof v !== 'string') return key;
+      if (vars) Object.entries(vars).forEach(([k, val]) => {
+        v = v.replace('{' + k + '}', val);
+      });
+      return v;
+    };
+  }
+
+  function coiTour(page) {
+    /* Шаги тура. sel — CSS-селектор якоря; before/after — имена методов,
+       которые надо выполнить до показа шага и при выходе из тура. */
+    const TOURS = {
+      browse: [
+        { k: 'nav',     sel: '[data-tour="nav"]' },
+        { k: 'search',  sel: '[data-tour="search"]' },
+        { k: 'filters', sel: '[data-tour="filters"]' },
+        { k: 'row',     sel: '[data-tour="row"]' },
+        { k: 'newcx',   sel: '[data-tour="newcx"]' },
+        { k: 'select',  sel: '[data-tour="selbar"]', before: 'selectFirst', after: 'unselect' },
+        { k: 'help',    sel: '[data-tour="help"]' },
+      ],
+      needs: [
+        { k: 'params',  sel: '[data-tour="pop-params"]' },
+        { k: 'section', sel: '[data-tour="pop-sechead"]' },
+        { k: 'fields',  sel: '[data-tour="pop-fields"]' },
+        { k: 'cover',   sel: '[data-tour="pop-cover"]' },
+        { k: 'recycle', sel: '[data-tour="pop-recycle"]' },
+        { k: 'fork',    sel: '[data-tour="pop-fork"]' },
+        { k: 'outputs', sel: '[data-tour="pop-outputs"]' },
+      ],
+      editor: [
+        { k: 'canvas',  sel: '[data-tour="ed-canvas"]' },
+        { k: 'node',    sel: '[data-tour="ed-node"]' },
+        { k: 'port',    sel: '[data-tour="ed-port"]' },
+        { k: 'lcm',     sel: '[data-act="lcm"]' },
+        { k: 'summary', sel: '[data-tour="ed-summary"]' },
+        { k: 'save',    sel: '[data-tour="ed-save"]' },
+        { k: 'fork',    sel: '[data-tour="ed-fork"]' },
+      ],
+    };
+
+    return {
+      page, i: 0, active: false, welcome: false, help: false,
+      steps: [], seen: [],
+      box:  { t: 0, l: 0, w: 0, h: 0 },
+      card: { t: 0, l: 0 },
+      _tookSelection: false,
+
+      init() {
+        this.seen = this.loadSeen();
+        // Ссылка вида /complex/x/view?tour=editor открывает страницу сразу
+        // с туром. Ждём, пока появится первый якорь: холст и узлы приходят
+        // с сервера уже после загрузки страницы.
+        const want = new URLSearchParams(location.search).get('tour');
+        if (want && TOURS[want]) {
+          let tries = 0;
+          const wait = setInterval(() => {
+            const ready = TOURS[want].some(st => this.elOf(st));
+            if (ready || ++tries > 40) { clearInterval(wait); if (ready) this.start(want); }
+          }, 200);
+          return;
+        }
+        if (this.page !== 'browse' || this.seen.includes('welcome')) return;
+        // Приветствие — только на главной и только один раз. Плашка про
+        // cookie появляется у того же новичка, поэтому ждём, пока он её
+        // закроет: два перекрывающих друг друга окна на первом экране —
+        // худшее знакомство с сайтом.
+        const cookieDone = () => {
+          try { return !!localStorage.getItem('coi_cookie_ok'); } catch (e) { return true; }
+        };
+        const show = () => { if (!this.active && !this.help) this.welcome = true; };
+        if (cookieDone()) { setTimeout(show, 700); return; }
+        const timer = setInterval(() => {
+          if (cookieDone()) { clearInterval(timer); setTimeout(show, 400); }
+        }, 500);
+        setTimeout(() => clearInterval(timer), 120000);
+      },
+
+      /* ── состояние «уже видел» ─────────────────────────────────── */
+      loadSeen() {
+        let local = [];
+        try { local = JSON.parse(localStorage.getItem('coi_tour_seen') || '[]'); } catch (e) {}
+        const remote = (window._coiTourSeen || '').split(',').filter(Boolean);
+        return [...new Set([...local, ...remote])];
+      },
+      markSeen(id) {
+        if (this.seen.includes(id)) return;
+        this.seen.push(id);
+        try { localStorage.setItem('coi_tour_seen', JSON.stringify(this.seen)); } catch (e) {}
+        if (window._coiUser && !window._coiUser.is_guest) {
+          fetch('/api/settings', {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tour_seen: this.seen.join(',') }),
+          }).catch(() => {});
+        }
+      },
+
+      /* ── доступ к данным страницы (для шагов с действиями) ─────── */
+      app() {
+        try { return Alpine.$data(document.body); } catch (e) { return null; }
+      },
+      hasTour() { return !!TOURS[this.page]; },
+
+      /* ── запуск и остановка ───────────────────────────────────── */
+      start(id) {
+        const key = id || this.page;
+        if (!TOURS[key]) return;
+        this.page = key;
+        this.steps = TOURS[key];
+        this.welcome = false;
+        this.help = false;
+        this.active = true;
+        this.i = -1;
+        this.go(1);
+      },
+      stop() {
+        if (!this.active) return;
+        this.active = false;
+        this.runAll('after');
+        this.markSeen(this.page);
+      },
+      onEsc() {
+        if (this.active) this.stop();
+        else if (this.welcome) this.closeWelcome();
+        else if (this.help) this.help = false;
+      },
+      closeWelcome() { this.welcome = false; this.markSeen('welcome'); },
+
+      /* ── переходы: шаги без якоря на странице пропускаем ───────── */
+      go(dir) {
+        let j = this.i + dir;
+        while (j >= 0 && j < this.steps.length && !this.elOf(this.steps[j])) j += dir;
+        if (j < 0) return;                       // назад дальше некуда — стоим
+        if (j >= this.steps.length) { this.stop(); return; }
+        this.i = j;
+        this.enter();
+      },
+      next() { this.go(1); },
+      prev() { this.go(-1); },
+      isLast() {
+        for (let j = this.i + 1; j < this.steps.length; j++) {
+          if (this.elOf(this.steps[j])) return false;
+        }
+        return true;
+      },
+      counter() {
+        const n = this.steps.filter(s => this.elOf(s)).length;
+        const k = this.steps.slice(0, this.i + 1).filter(s => this.elOf(s)).length;
+        return '{{ t('tour.step_of') }}'.replace('{i}', k).replace('{n}', n);
+      },
+
+      /* ── показ шага ───────────────────────────────────────────── */
+      elOf(step) {
+        if (!step) return null;
+        // Шаг с подготовкой считаем достижимым: его якорь появится позже.
+        if (step.before && this[step.before]) return document.querySelector(step.sel) || true;
+        const el = document.querySelector(step.sel);
+        if (!el) return null;
+        // Элемент может быть в разметке, но скрыт (другая вкладка, гость).
+        const r = el.getBoundingClientRect();
+        return (r.width > 0 && r.height > 0) ? el : null;
+      },
+      enter() {
+        const step = this.steps[this.i];
+        if (step.before && this[step.before]) this[step.before]();
+        this.$nextTick(() => {
+          const el = document.querySelector(step.sel);
+          if (el) {
+            const r = el.getBoundingClientRect();
+            // Узлы редактора живут в своём прокручиваемом холсте и часто
+            // оказываются за краем — центрируем и по горизонтали тоже.
+            const off = r.top < 60 || r.bottom > window.innerHeight - 40
+                     || r.left < 8 || r.right > window.innerWidth - 8;
+            if (off) el.scrollIntoView({ block: 'center', inline: 'center' });
+          }
+          this.measure();
+          // Панели с анимацией появления доезжают позже — уточняем рамку.
+          setTimeout(() => this.measure(), 260);
+        });
+      },
+      measure() {
+        if (!this.active) return;
+        const step = this.steps[this.i];
+        const el = step && document.querySelector(step.sel);
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        const pad = 4;
+        this.box = {
+          t: Math.max(4, r.top - pad), l: Math.max(4, r.left - pad),
+          w: Math.min(r.width + pad * 2, window.innerWidth - 8),
+          h: r.height + pad * 2,
+        };
+        const cw = Math.min(340, window.innerWidth - 24);
+        const ch = (this.$refs.card && this.$refs.card.offsetHeight) || 180;
+        // Снизу, если помещается; иначе сверху; узкий экран — прижимаем к низу.
+        let top = this.box.t + this.box.h + 12;
+        if (top + ch > window.innerHeight - 12) {
+          top = this.box.t - ch - 12;
+          if (top < 12) top = Math.max(12, window.innerHeight - ch - 12);
+        }
+        let left = this.box.l + this.box.w / 2 - cw / 2;
+        left = Math.max(12, Math.min(left, window.innerWidth - cw - 12));
+        this.card = { t: top, l: left };
+      },
+      txt(part) {
+        const step = this.steps[this.i];
+        return step ? jt('tour.' + this.page + '_' + step.k + '_' + part) : '';
+      },
+
+      /* ── действия шагов ───────────────────────────────────────── */
+      runAll(kind) {
+        for (const s of this.steps) if (s[kind] && this[s[kind]]) this[s[kind]]();
+      },
+      /* Панель массовых действий видна только при выделении — отмечаем
+         первую строку сами и снимаем отметку на выходе из тура. */
+      selectFirst() {
+        const a = this.app();
+        if (!a || !a.sorted || !a.sorted.length) return;
+        if (a.selected && a.selected.size === 0) {
+          a.toggleSelect(a.sorted[0]);
+          this._tookSelection = true;
+        }
+      },
+      unselect() {
+        const a = this.app();
+        if (this._tookSelection && a && a.clearSelection) a.clearSelection();
+        this._tookSelection = false;
+      },
+    };
+  }
+</script>
