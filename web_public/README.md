@@ -54,6 +54,7 @@ web_public/
 ├── app.py              # Flask app, routes, API (dev port 5001)
 ├── auth.py             # guest UUID · email code · Google OAuth · Steam OpenID
 ├── seo.py              # server-rendered reference pages · robots.txt · sitemap.xml
+├── monitoring.py       # daily snapshots · health checks · admin dashboard data
 ├── db.py               # psycopg2 connection helper
 ├── requirements.txt    # runtime deps
 ├── requirements-dev.txt# test/lint deps
@@ -128,6 +129,8 @@ Open http://localhost:5001
 | `MAX_COMPLEXES_PER_USER` | Per-account complex cap; `0` = unlimited |
 | `RATELIMIT_STORAGE_URI` | Flask-Limiter backend (default in-memory; use Redis in production) |
 | `TRUST_PROXY` | Set to `1` only when running behind Nginx, so Flask trusts `X-Forwarded-*` (HTTPS in OAuth redirects and `og:url`) |
+| `ADMIN_EMAILS` | Comma-separated addresses allowed into `/admin/stats`; also the recipients of monitoring alerts. Empty disables the dashboard entirely |
+| `MONITOR_*` | Alert thresholds — see the Monitoring section and `.env.example` |
 | `SITE_URL` | Public origin, e.g. `https://coi-planner.com`. Used for absolute URLs in `sitemap.xml` and canonical tags — **set it in production**, or the sitemap will point at the internal host over `http` and search engines will ignore it |
 
 See `.env.example` for the annotated, complete list.
@@ -137,10 +140,97 @@ See `.env.example` for the annotated, complete list.
 ## CLI commands
 
 ```bash
+flask stats                                     # one-off traffic summary to the console
+flask collect-stats [--day YYYY-MM-DD]          # write a daily snapshot into daily_stats
+flask collect-stats --backfill 60               # reconstruct the last 60 days from created_at
 flask cleanup-guests [--months N] [--dry-run]   # remove stale guest accounts (default 6 months)
 flask cleanup-ghosts [--dry-run]                # purge orphaned ghost complexes
 flask send-test-email you@example.com           # verify SMTP configuration
 ```
+
+---
+
+## Monitoring
+
+A daily snapshot of activity and system health is written to `daily_stats`, and
+`/admin/stats` renders it as a private dashboard.
+
+**Why snapshots and not live queries.** Most user metrics could be recomputed from
+`created_at` — but `cleanup-guests` deletes guests older than six months and takes the
+traffic history with them. Database size, free disk and "active in the last 24h"
+(`last_seen_at` holds one current value per user, not a history) cannot be reconstructed
+at all.
+
+### Setup
+
+1. Apply the migration — `psql -d coi_public -f sql/migration_v10_monitoring.sql`
+   (already included in `schema.sql` for fresh databases).
+2. Set `ADMIN_EMAILS` in `.env` to the address you log in with. Without it the
+   dashboard does not exist for anyone and alert emails have nowhere to go.
+3. Seed some history: `flask collect-stats --backfill 60`.
+4. Schedule the daily run.
+
+```bash
+# crontab -e — every day at 00:20 UTC, for the day that just ended
+20 0 * * *  cd /app && /app/.venv/bin/flask collect-stats >> /var/log/coi_stats.log 2>&1
+```
+
+Or as a systemd timer, if the rest of the deployment already uses systemd:
+
+```ini
+# /etc/systemd/system/coi-stats.service
+[Unit]
+Description=CoI Planner daily stats
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/app
+EnvironmentFile=/app/.env
+ExecStart=/app/.venv/bin/flask collect-stats
+
+# /etc/systemd/system/coi-stats.timer
+[Unit]
+Description=Run CoI Planner stats daily
+
+[Timer]
+OnCalendar=*-*-* 00:20:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+`Persistent=true` matters: if the server was down at 00:20, the run happens on the next
+boot instead of being skipped.
+
+### Access
+
+`/admin/stats` and `/admin/stats.json` are restricted to `ADMIN_EMAILS` and return **404**
+to everyone else — a 403 would confirm the route exists to anyone probing for it. The page
+carries `noindex` and is excluded from `sitemap.xml`.
+
+### Alerts
+
+After each collection the snapshot is compared against the previous two weeks. A single
+email goes to `ADMIN_EMAILS` listing everything that fired:
+
+| Check | Fires when |
+|-------|-----------|
+| `disk_low` | free disk below `MONITOR_DISK_MIN_RATIO` (default 15%; critical under 5%) |
+| `db_growth` | database grew more than `MONITOR_DB_GROWTH_RATIO` in a day (default 25%) |
+| `no_traffic` | zero new visitors on a day that normally has some — usually means the site is down |
+| `traffic_drop` | new visitors below `MONITOR_TRAFFIC_DROP_RATIO` of the weekly median, and only once the median passes `MONITOR_TRAFFIC_MIN_BASELINE` |
+| `collector_gap` | a gap in the snapshot history, detected on the next successful run |
+
+`UNIQUE (day, kind)` on `monitor_alerts` means the same check never emails twice for the
+same day, however often the collector runs.
+
+> **Limitation worth knowing.** These checks run *inside* the collector, so a host that is
+> fully down sends nothing — there is no one left to send it. The dashboard shows a red
+> banner once the newest snapshot is over 36 hours old, but catching an outage while it is
+> happening needs an external pinger (UptimeRobot, Healthchecks.io or similar) hitting the
+> site on a schedule.
 
 ---
 
