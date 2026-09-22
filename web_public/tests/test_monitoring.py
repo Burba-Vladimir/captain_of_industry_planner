@@ -237,6 +237,30 @@ class TestAlertDedup:
                     (D2,))
                 assert cur.fetchone()[0] > 0
 
+    def test_sender_falls_back_when_smtp_from_is_blank(self, monkeypatch):
+        """SMTP_FROM обычно есть в .env, но пустой — письмо не должно уходить без отправителя."""
+        import smtplib
+        from auth import send_mail
+
+        sent = {}
+
+        class FakeSMTP:
+            def __init__(self, host, port): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def ehlo(self): pass
+            def starttls(self): pass
+            def login(self, u, p): pass
+            def sendmail(self, frm, to, msg): sent["from"] = frm
+
+        monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+        monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+        monkeypatch.setenv("SMTP_USER", "robot@example.com")
+        monkeypatch.setenv("SMTP_FROM", "")
+
+        assert send_mail("to@example.com", "тема", "текст") is True
+        assert sent["from"] == "robot@example.com"
+
     def test_failed_send_leaves_alert_unnotified(self, clean_synthetic):
         """Письмо не ушло — тревога записана, но не помечена отправленной."""
         def broken_mail(subject, body):
