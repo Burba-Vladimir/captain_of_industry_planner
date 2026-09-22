@@ -334,10 +334,11 @@ def _gen_email_code() -> str:
     return f"{random.randint(0, 999999):06d}"
 
 
-def _send_email(to: str, code: str) -> None:
-    """
-    Отправляет письмо с кодом.
-    Если SMTP не настроен — выводит код в лог (для разработки).
+def send_mail(to: str, subject: str, body_text: str, body_html: str | None = None) -> bool:
+    """Отправляет письмо. Возвращает True, если письмо действительно ушло.
+
+    Общий отправитель: им пользуются и коды входа, и мониторинг.
+    Без SMTP_HOST пишет в лог и возвращает False — это dev-режим, а не ошибка.
     """
     smtp_host = os.environ.get("SMTP_HOST")
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
@@ -345,6 +346,33 @@ def _send_email(to: str, code: str) -> None:
     smtp_pass = os.environ.get("SMTP_PASS", "")
     smtp_from = os.environ.get("SMTP_FROM", smtp_user or "noreply@coi-planner.app")
 
+    if not smtp_host:
+        log.warning("SMTP not configured — письмо для %s не отправлено: %s", to, subject)
+        return False
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = smtp_from
+    msg["To"]      = to
+    msg.attach(MIMEText(body_text, "plain"))
+    if body_html:
+        msg.attach(MIMEText(body_html, "html"))
+
+    with smtplib.SMTP(smtp_host, smtp_port) as srv:
+        srv.ehlo()
+        if smtp_port != 465:
+            srv.starttls()
+        if smtp_user and smtp_pass:
+            srv.login(smtp_user, smtp_pass)
+        srv.sendmail(smtp_from, [to], msg.as_string())
+    return True
+
+
+def _send_email(to: str, code: str) -> None:
+    """
+    Отправляет письмо с кодом.
+    Если SMTP не настроен — выводит код в лог (для разработки).
+    """
     subject = "Your CoI Planner login code"
     body_text = f"Your login code: {code}\n\nThis code expires in 15 minutes."
     body_html = f"""
@@ -358,26 +386,9 @@ def _send_email(to: str, code: str) -> None:
   <p style="color:#64748b;font-size:.85rem">Expires in 15 minutes. Do not share this code.</p>
 </div>"""
 
-    if not smtp_host:
-        # Dev-режим: просто логируем
-        log.warning("SMTP not configured — email code for %s: %s", to, code)
+    if not send_mail(to, subject, body_text, body_html):
+        # Dev-режим: кода нет в почте, поэтому показываем его в консоли
         print(f"\n{'='*40}\nEmail code for {to}: {code}\n{'='*40}\n")
-        return
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"]    = smtp_from
-    msg["To"]      = to
-    msg.attach(MIMEText(body_text, "plain"))
-    msg.attach(MIMEText(body_html, "html"))
-
-    with smtplib.SMTP(smtp_host, smtp_port) as srv:
-        srv.ehlo()
-        if smtp_port != 465:
-            srv.starttls()
-        if smtp_user and smtp_pass:
-            srv.login(smtp_user, smtp_pass)
-        srv.sendmail(smtp_from, [to], msg.as_string())
 
 
 def _merge_guest_to_user(guest_id: int, real_id: int) -> None:

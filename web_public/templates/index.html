@@ -1849,6 +1849,10 @@ function app() {
   <a href="/about" class="hover:text-slate-400 dark:hover:text-slate-400 hover:underline">{{ t('nav.about') }}</a>
   &nbsp;&middot;&nbsp;
   <a href="/privacy" class="hover:text-slate-400 dark:hover:text-slate-400 hover:underline">{{ t('cookie.privacy_link') }}</a>
+  {% if is_admin %}
+  &nbsp;&middot;&nbsp;
+  <a href="/admin/stats" class="hover:text-slate-400 dark:hover:text-slate-400 hover:underline">Мониторинг</a>
+  {% endif %}
 </footer>
 
 <!-- ── Cookie consent banner ──────────────────────────────────────── -->

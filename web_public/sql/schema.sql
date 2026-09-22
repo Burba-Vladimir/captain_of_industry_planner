@@ -582,6 +582,57 @@ CREATE INDEX IF NOT EXISTS idx_complex_tags_tag     ON complex_tags(tag_id);
 CREATE INDEX IF NOT EXISTS idx_complex_tags_complex ON complex_tags(complex_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- 11. МОНИТОРИНГ
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Суточные срезы активности и здоровья. Заполняет `flask collect-stats`.
+-- Подробные комментарии — в sql/migration_v10_monitoring.sql.
+
+CREATE TABLE IF NOT EXISTS daily_stats (
+    day                 DATE        PRIMARY KEY,
+    collected_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_backfilled       BOOLEAN     NOT NULL DEFAULT FALSE,
+
+    users_total         INTEGER,
+    users_registered    INTEGER,
+    users_guests        INTEGER,
+    new_guests          INTEGER,
+    new_registered      INTEGER,
+    active_24h          INTEGER,
+    active_7d           INTEGER,
+
+    cx_total            INTEGER,
+    cx_public           INTEGER,
+    cx_new              INTEGER,
+    cx_new_public       INTEGER,
+    cx_new_forks        INTEGER,
+    cx_edited           INTEGER,
+    likes_new           INTEGER,
+    subs_new            INTEGER,
+
+    db_size_bytes       BIGINT,
+    disk_free_bytes     BIGINT,
+    disk_total_bytes    BIGINT,
+    db_connections      INTEGER,
+    collect_ms          INTEGER,
+
+    breakdown           JSONB       NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_daily_stats_day_desc ON daily_stats (day DESC);
+
+CREATE TABLE IF NOT EXISTS monitor_alerts (
+    id          SERIAL      PRIMARY KEY,
+    day         DATE        NOT NULL,
+    kind        TEXT        NOT NULL,
+    severity    TEXT        NOT NULL DEFAULT 'warning'
+                            CHECK (severity IN ('info', 'warning', 'critical')),
+    message     TEXT        NOT NULL,
+    notified_at TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (day, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_alerts_created ON monitor_alerts (created_at DESC);
+
+-- ─────────────────────────────────────────────────────────────────────────────
 
 DO $$
 BEGIN RAISE NOTICE 'CoI Public schema initialization complete.'; END $$;

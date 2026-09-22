@@ -295,6 +295,8 @@ app.register_blueprint(auth_bp)
 from seo import (seo_bp, item_url as _seo_item_url,
                  building_url as _seo_building_url, content_counts as _content_counts)
 
+import monitoring as _monitoring
+
 app.register_blueprint(seo_bp)
 app.jinja_env.globals["seo_item_url"]     = _seo_item_url
 app.jinja_env.globals["seo_building_url"] = _seo_building_url
@@ -474,6 +476,41 @@ app.jinja_env.globals["current_user"] = lambda: g.get("user")
 GOOGLE_ENABLED = bool(os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET"))
 STEAM_ENABLED  = bool(os.environ.get("STEAM_API_KEY"))
 
+# ─────────────────────────────────────────────────────────────────
+# Админ-доступ
+# ─────────────────────────────────────────────────────────────────
+# Список почт через запятую в ADMIN_EMAILS. Пусто — админки нет вообще:
+# это безопасное значение по умолчанию, случайно открытой она не окажется.
+ADMIN_EMAILS = {
+    e.strip().lower()
+    for e in os.environ.get("ADMIN_EMAILS", "").split(",")
+    if e.strip()
+}
+
+
+def _is_admin() -> bool:
+    user = g.get("user")
+    if not user or user.get("is_guest") or not user.get("email"):
+        return False
+    # Обе стороны приводим к нижнему регистру здесь же: полагаться на то, что
+    # ADMIN_EMAILS уже нормализован, — способ однажды не пустить самого себя.
+    return user["email"].strip().lower() in {e.strip().lower() for e in ADMIN_EMAILS}
+
+
+def admin_required(f):
+    """Пускает только админов. Остальным — 404, а не 403.
+
+    404 не подтверждает, что роут существует: по 403 админку можно найти
+    перебором, по 404 — нет.
+    """
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        if not _is_admin():
+            abort(404)
+        return f(*args, **kwargs)
+    return wrapper
+
+
 # Ссылки на донаты (переопределяются через .env при необходимости)
 DONATE_LAVA_URL   = os.environ.get("DONATE_LAVA_URL",   "https://app.lava.top/products/4f9189e1-9e48-4d01-964d-5e5765adacb7")
 DONATE_BOOSTY_URL = os.environ.get("DONATE_BOOSTY_URL", "https://boosty.to/burba_vladimir/donate")
@@ -498,6 +535,7 @@ def inject_template_globals():
         "lang": lang, "theme": theme, "i18n": i18n, "user": user, "tour_seen": tour_seen,
         "google_enabled": GOOGLE_ENABLED, "steam_enabled": STEAM_ENABLED,
         "donate_lava_url": DONATE_LAVA_URL, "donate_boosty_url": DONATE_BOOSTY_URL,
+        "is_admin": _is_admin(),
     }
 
 
@@ -981,6 +1019,25 @@ def tour_editor():
     if not slug:
         return redirect(url_for("index"))
     return redirect(url_for("complex_view", slug=slug) + "?tour=editor")
+
+
+# ── Админка: мониторинг ──────────────────────────────────────────
+
+@app.route("/admin/stats")
+@admin_required
+def admin_stats():
+    days = min(365, max(7, request.args.get("days", 30, type=int)))
+    return render_template("admin_stats.html",
+                           data=_monitoring.dashboard_data(days),
+                           user=g.get("user"))
+
+
+@app.route("/admin/stats.json")
+@admin_required
+def admin_stats_json():
+    """Те же данные машиночитаемо — для выгрузки или внешнего графика."""
+    days = min(365, max(7, request.args.get("days", 30, type=int)))
+    return jsonify(_monitoring.dashboard_data(days))
 
 
 @app.route("/complex/new")
@@ -3228,6 +3285,73 @@ def stats() -> None:
                            GROUP BY provider ORDER BY count(*) DESC""")
             for p, n in cur.fetchall():
                 click.echo(f"  {p}: {n}")
+
+
+@app.cli.command("collect-stats")
+@click.option("--day", default=None,
+              help="Сутки в формате YYYY-MM-DD. По умолчанию — вчера.")
+@click.option("--backfill", default=0, type=int,
+              help="Восстановить N прошлых суток из created_at и выйти.")
+@click.option("--dry-run", is_flag=True, help="Посчитать и показать, но не записывать.")
+@click.option("--no-alerts", is_flag=True, help="Не прогонять проверки и не слать письмо.")
+def collect_stats(day: str | None, backfill: int, dry_run: bool, no_alerts: bool) -> None:
+    """Собирает суточный срез активности и здоровья в daily_stats.
+
+    Запуск вручную:
+        flask collect-stats
+        flask collect-stats --day 2026-09-20
+        flask collect-stats --backfill 60      # разово, при первой установке
+        flask collect-stats --dry-run
+
+    Cron (каждый день в 00:20 UTC, за прошедшие сутки):
+        20 0 * * *  cd /app && flask collect-stats >> /var/log/coi_stats.log 2>&1
+    """
+    if backfill:
+        written = _monitoring.backfill(backfill)
+        click.echo(f"Восстановлено суток: {written}")
+        return
+
+    target = _dt.date.fromisoformat(day) if day else \
+        _monitoring.today_utc() - _dt.timedelta(days=1)
+
+    row = _monitoring.collect_day(target, dry_run=dry_run)
+
+    click.echo(f"── Срез за {target}{' (dry-run, не записан)' if dry_run else ''} ──")
+    click.echo(f"Посетителей новых / регистраций:   "
+               f"{row['new_guests']} / {row['new_registered']}")
+    click.echo(f"Активны 24ч / 7д:                  "
+               f"{row['active_24h']} / {row['active_7d']}")
+    click.echo(f"Комплексов новых / публичных / форков: "
+               f"{row['cx_new']} / {row['cx_new_public']} / {row['cx_new_forks']}")
+    click.echo(f"Лайков / подписок:                 {row['likes_new']} / {row['subs_new']}")
+    if row.get("db_size_bytes"):
+        click.echo(f"База:                              {row['db_size_bytes'] / 2**20:.0f} МБ")
+    if row.get("disk_free_bytes") and row.get("disk_total_bytes"):
+        pct = row["disk_free_bytes"] / row["disk_total_bytes"] * 100
+        click.echo(f"Диск свободно:                     "
+                   f"{row['disk_free_bytes'] / 2**30:.1f} ГБ ({pct:.0f}%)")
+    click.echo(f"Сбор занял:                        {row['collect_ms']} мс")
+
+    if dry_run or no_alerts:
+        return
+
+    fresh = _monitoring.run_checks(target, send_email=_send_admin_mail)
+    if fresh:
+        click.echo(f"\n── Тревоги ({len(fresh)}) ──")
+        for a in fresh:
+            click.echo(f"  [{a['severity']}] {a['message']}")
+    else:
+        click.echo("\nПроверки пройдены.")
+
+
+def _send_admin_mail(subject: str, body: str) -> None:
+    """Шлёт письмо всем адресам из ADMIN_EMAILS."""
+    from auth import send_mail
+    if not ADMIN_EMAILS:
+        app.logger.warning("monitoring: ADMIN_EMAILS пуст, письмо отправить некому")
+        return
+    for addr in sorted(ADMIN_EMAILS):
+        send_mail(addr, subject, body)
 
 
 @app.cli.command("cleanup-guests")
