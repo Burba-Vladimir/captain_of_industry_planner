@@ -344,7 +344,9 @@ def send_mail(to: str, subject: str, body_text: str, body_html: str | None = Non
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
     smtp_user = os.environ.get("SMTP_USER", "")
     smtp_pass = os.environ.get("SMTP_PASS", "")
-    smtp_from = os.environ.get("SMTP_FROM", smtp_user or "noreply@coi-planner.app")
+    # `or`, а не второй аргумент get: SMTP_FROM обычно присутствует в .env,
+    # но пустой — get вернул бы пустую строку, и письмо ушло бы без отправителя.
+    smtp_from = os.environ.get("SMTP_FROM") or smtp_user or "noreply@coi-planner.app"
 
     if not smtp_host:
         log.warning("SMTP not configured — письмо для %s не отправлено: %s", to, subject)
