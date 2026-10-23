@@ -1398,10 +1398,15 @@ def api_population_data():
     FOOD_BUILDINGS = ("Farm", "Irrigated Farm", "Greenhouse", "Greenhouse II",
                       "Chicken Farm", "Food Processor", "Mill", "Baking Unit",
                       "Mixer", "Mixer II")
-    CHAIN_EXTRA_ROOTS = ("Poppy", "Sugar", "Food Pack")
+    # Этанол нужен медикаментам (дезинфицирующее), но его делают не только
+    # из водорода: ферментёр гонит его из тростника и кукурузы, то есть из
+    # того, что уже растёт на полях. Поэтому он — такой же корень цепочки,
+    # как мак, с развилкой по сырью.
+    CHAIN_EXTRA_ROOTS = ("Poppy", "Sugar", "Ethanol", "Food Pack")
     # Пайки делают на сборочной линии, а не на пищевом здании, но по сути
-    # это такой же продукт цепочки: он потребляет готовую еду.
-    CHAIN_ANY_BUILDING = ("Food Pack",)
+    # это такой же продукт цепочки: он потребляет готовую еду. Этанол так же:
+    # ферментёр и химзавод в пищевые здания не входят.
+    CHAIN_ANY_BUILDING = ("Food Pack", "Ethanol")
     # Вода и удобрения — общие ресурсы, вглубь не разворачиваются.
     def chain_stop(name):
         return name == "Water" or name.startswith("Fertilizer")

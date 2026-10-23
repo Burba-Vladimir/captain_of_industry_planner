@@ -1411,7 +1411,13 @@ function populationCalc() {
             best = Math.min(best, cost);
           }
         }
-        return isFinite(best) ? best : 0;
+        if (isFinite(best)) return best;
+        // Своих рецептов нет и побочно предмет не выходит — значит он
+        // приходит извне, земли под него не нужно. А вот если рецепты есть,
+        // но ни один не работает на выбранной ферме (тростник растёт только
+        // в теплице II), это не «бесплатно», а «нельзя»: иначе недоступный
+        // рецепт оказался бы самым дешёвым и его выбрали бы по умолчанию.
+        return this.kindsOf(item).length ? Infinity : 0;
       });
     },
     // Все роды рецептов предмета, от дешёвого к дорогому.
@@ -1489,7 +1495,10 @@ function populationCalc() {
       const others = kinds.filter(k => k !== kind).map(k => this.kindOption(item, k))
                           .filter(Boolean).map(names);
       if (others.length) {
-        const rest = names(o).filter(n => !others.every(list => list.includes(n)));
+        // Оставляем только то, чего нет ни в одном другом роде. Сравнивать со
+        // «всеми остальными» нельзя: у этанола кислород есть в двух рецептах
+        // из трёх, и подпись превращалась в перечисление всего состава.
+        const rest = names(o).filter(n => !others.some(list => list.includes(n)));
         if (rest.length) return rest.join(', ');
       }
       return o.kind_display && o.kind_display !== '—' ? o.kind_display : o.building_display;
