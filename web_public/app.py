@@ -577,6 +577,12 @@ def _get_user_setting(user_id: int, key: str) -> str | None:
 
 
 def _set_user_setting(user_id: int, key: str, value: str):
+    # У краулера пользователь псевдо-, с id=None: записи в users нет, и
+    # INSERT уходил бы в ошибку. Настройки ему не нужны — молча не пишем.
+    # Проверка здесь, а не на каждом вызове: писать настройки умеют и
+    # /set-lang, и /set-theme, и /api/settings.
+    if user_id is None:
+        return
     with get_db() as con:
         with con.cursor() as cur:
             cur.execute("""

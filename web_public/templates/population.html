@@ -171,11 +171,17 @@
         <template x-for="f in families" :key="f.family">
           <div class="flex items-center gap-2">
             <span class="text-sm flex-1 min-w-0 truncate" x-text="f.display" :title="f.display"></span>
-            <select :value="tiers[f.family]" @change="setTier(f.family, Number($event.target.value))"
+            <!-- Выбранный уровень помечаем на самом пункте, а не через :value
+                 у списка: список сидит внутри x-for по семействам, и к моменту
+                 присвоения значения его пункты ещё не созданы — выбор не
+                 применялся, и список показывал первый уровень вместо
+                 сохранённого. -->
+            <select @change="setTier(f.family, Number($event.target.value))"
                     class="w-20 px-1.5 py-1 rounded border border-slate-300 dark:border-slate-600
                            bg-white dark:bg-slate-700 text-sm shrink-0">
               <template x-for="t in f.tiers" :key="t.tier">
-                <option :value="t.tier" x-text="romanOf(t.tier)"></option>
+                <option :value="t.tier" :selected="Number(t.tier) === Number(tiers[f.family])"
+                        x-text="romanOf(t.tier)"></option>
               </template>
             </select>
           </div>
