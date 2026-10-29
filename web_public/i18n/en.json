@@ -303,7 +303,19 @@
     "wood_need": "Wood, units/min",
     "wood_note": "1 sapling — 1 tree — {n} wood",
     "wood_saplings": "saplings: {n} /min",
-    "workers": "Workers"
+    "workers": "Workers",
+    "edicts": "Edicts",
+    "edicts_hint": "Captain's Office edicts. Levels stack; each costs 1 Unity per month.",
+    "edicts_cost": "Costs {n} Unity per month",
+    "edicts_none": "—",
+    "edict_food_saver": "Food Saver",
+    "edict_plenty_of_food": "Plenty of Food",
+    "edict_more_goods": "More Household Goods",
+    "edict_more_appliances": "More Household Appliances",
+    "edict_more_electronics": "More Consumer Electronics",
+    "edict_farming_boost": "Farming Boost",
+    "edict_water_saver": "Water Saver",
+    "edict_maintenance_reducer": "Maintenance Reducer"
   },
   "tour": {
     "help_title": "Help",

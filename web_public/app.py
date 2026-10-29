@@ -1453,6 +1453,27 @@ def api_population_data():
             return "burn"
         return None
 
+    # Указы Ратуши (Captain's Office). Уровни включаются по порядку и
+    # складываются: «Экономия еды II» работает вместе с I, то есть −30 %.
+    # Каждый уровень стоит 1 Единство в месяц.
+    # Здесь только те, что меняют наши расчёты; рост населения, карантин,
+    # топливо машин, солнечные панели и исследования на план не влияют.
+    EDICTS = [
+        {"key": "food_saver",      "effect": "food",       "levels": [-0.20, -0.10]},
+        {"key": "plenty_of_food",  "effect": "food",       "levels": [0.20, 0.20]},
+        {"key": "more_goods",      "effect": "item",       "item": "Household Goods",
+         "levels": [0.20, 0.20, 0.30], "unity_bonus": 0.15},
+        {"key": "more_appliances", "effect": "item",       "item": "Household Appliances",
+         "levels": [0.20, 0.20, 0.30], "unity_bonus": 0.15},
+        {"key": "more_electronics", "effect": "item",      "item": "Consumer Electronics",
+         "levels": [0.20, 0.20, 0.30], "unity_bonus": 0.15},
+        # Урожайность растёт вместе с расходом воды на те же проценты.
+        {"key": "farming_boost",   "effect": "farm_yield", "levels": [0.15, 0.12, 0.08]},
+        # Вода экономится и в поселении, и на фермах.
+        {"key": "water_saver",     "effect": "water",      "levels": [0.15, 0.12, 0.08]},
+        {"key": "maintenance_reducer", "effect": "maintenance", "levels": [0.15, 0.10, 0.05]},
+    ]
+
     # Выбор по умолчанию: (предмет, здание, обязательный вход или None).
     PREFERRED = [
         ("Waste Water",  "Wastewater Treatment",   "Filter Media"),
@@ -1977,6 +1998,7 @@ def api_population_data():
         "disposal":        disposal,
         "base_population": 10000,
         "grown_items":     grown_items,
+        "edicts":          EDICTS,
         "prefs":           prefs,
     })
 

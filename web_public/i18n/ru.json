@@ -303,7 +303,19 @@
     "wood_need": "Древесина, ед./мин",
     "wood_note": "1 саженец — 1 дерево — {n} древесины",
     "wood_saplings": "саженцев: {n} /мин",
-    "workers": "Рабочие"
+    "workers": "Рабочие",
+    "edicts": "Указы",
+    "edicts_hint": "Указы Ратуши. Уровни складываются, каждый стоит 1 Единство в месяц.",
+    "edicts_cost": "Стоит {n} Единства в месяц",
+    "edicts_none": "—",
+    "edict_food_saver": "Экономия еды",
+    "edict_plenty_of_food": "Изобилие еды",
+    "edict_more_goods": "Больше ширпотреба",
+    "edict_more_appliances": "Больше бытовой техники",
+    "edict_more_electronics": "Больше электроники",
+    "edict_farming_boost": "Урожайность",
+    "edict_water_saver": "Экономия воды",
+    "edict_maintenance_reducer": "Экономия запчастей"
   },
   "tour": {
     "help_title": "Справка",

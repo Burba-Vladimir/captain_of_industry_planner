@@ -19,6 +19,12 @@
   <style>[x-cloak] { display: none !important; }</style>
 </head>
 
+<script>
+  /* Названия указов берём из серверного словаря: ключи известны заранее,
+     а отдельный клиентский i18n на этой странице заводить незачем. */
+  window._popI18n = {{ i18n.population | tojson }};
+</script>
+
 <body class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 min-h-screen"
       x-data="populationCalc()">
 
@@ -160,6 +166,46 @@
                   x-text="fz.display || '{{ t('population.no_fertilizer') }}'"></option>
         </template>
       </select>
+    </div>
+
+    <!-- Указы Ратуши. Уровни складываются: «Экономия еды II» работает
+         вместе с I. Блок свёрнут по умолчанию — он нужен не всем. -->
+    <div x-show="edictList.length">
+      <button type="button" @click="edictsOpen = !edictsOpen"
+              class="w-full flex items-center gap-1.5 text-xs font-semibold uppercase
+                     tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+        <svg class="w-3 h-3 shrink-0 transition-transform" viewBox="0 0 20 20"
+             fill="currentColor" :class="edictsOpen ? '' : '-rotate-90'">
+          <path d="M4 6.5h12L10 14z"></path>
+        </svg>
+        {{ t('population.edicts') }}
+        <span x-show="edictFx.cost > 0"
+              class="ml-auto normal-case font-semibold text-amber-600 dark:text-amber-400"
+              x-text="'−' + edictFx.cost"></span>
+      </button>
+      <div x-show="edictsOpen" class="space-y-1.5 mb-1">
+        <template x-for="e in edictList" :key="e.key">
+          <div class="flex items-center gap-2">
+            <span class="text-sm flex-1 min-w-0 truncate"
+                  x-text="edictName(e)" :title="edictName(e)"></span>
+            <select @change="setEdict(e.key, Number($event.target.value))"
+                    class="w-20 px-1.5 py-1 rounded border border-slate-300 dark:border-slate-600
+                           bg-white dark:bg-slate-700 text-sm shrink-0">
+              <option :value="0" :selected="!(Number(edicts[e.key]) > 0)">{{ t('population.edicts_none') }}</option>
+              <template x-for="(v, i) in e.levels" :key="i">
+                <option :value="i + 1" :selected="Number(edicts[e.key]) === i + 1"
+                        x-text="romanOf(i + 1)"></option>
+              </template>
+            </select>
+          </div>
+        </template>
+        <!-- Текст берём из словаря, а не подставляем в атрибут: в английском
+             «Captain's Office» апостроф закрывал бы строку выражения. -->
+        <p class="text-xs text-slate-400 dark:text-slate-500 pt-0.5"
+           x-text="edictFx.cost
+                   ? (_popI18n.edicts_cost || '').replace('{n}', edictFx.cost)
+                   : _popI18n.edicts_hint"></p>
+      </div>
     </div>
 
     <!-- Уровни зданий: у каждого семейства свой, они прокачиваются независимо -->
@@ -757,6 +803,9 @@ function populationCalc() {
     draft:      { population: 10000, woodNeed: 0, packNeed: 0 },
     isDark:     document.documentElement.classList.contains('dark'),
     chainChoice: {},  // предмет -> упорядоченные роды рецептов
+    edictList:  [],   // каталог указов Ратуши из данных
+    edicts:     {},   // ключ указа -> выбранный уровень (0 — выключен)
+    edictsOpen: false,
     farms:      [],   // справочник ферм и применимых на них удобрений
     farm:       null, // выбранная ферма (одна на всё поселение)
     fertilizer: null, // выбранное удобрение (одно на все фермы)
@@ -778,6 +827,7 @@ function populationCalc() {
       this.disposal   = data.disposal || {};
       this.fert       = data.fert || {};
       this.sapling    = data.sapling || null;
+      this.edictList  = data.edicts || [];
       if (this.farms.length) {
         // По умолчанию самая продуктивная связка: старшая теплица и
         // сильнейшее удобрение.
@@ -813,6 +863,7 @@ function populationCalc() {
       if (p.enabled)    Object.assign(this.enabled, p.enabled);
       if (p.collapsed)  Object.assign(this.collapsed, p.collapsed);
       if (p.dispChoice) Object.assign(this.dispChoice, p.dispChoice);
+      if (p.edicts)     Object.assign(this.edicts, p.edicts);
       if (p.woodNeed)   this.woodNeed = p.woodNeed;
       if (p.packNeed)   this.packNeed = p.packNeed;
       if (Array.isArray(p.sectionOrder) && p.sectionOrder.length) {
@@ -825,6 +876,7 @@ function populationCalc() {
       if ('medicine' in p) this.medicine = p.medicine;
 
       for (const k of ['population', 'woodNeed', 'packNeed']) this.draft[k] = this[k];
+      this.applyEdicts();
       this.loading = false;
     },
 
@@ -866,7 +918,7 @@ function populationCalc() {
             population: this.population, tiers: this.tiers,
             farm: this.farm, fertilizer: this.fertilizer,
             choice: this.choice, enabled: this.enabled, medicine: this.medicine,
-            chainChoice: this.chainChoice,
+            chainChoice: this.chainChoice, edicts: this.edicts,
             sectionOrder: this.sectionOrder, collapsed: this.collapsed,
             dispChoice: this.dispChoice, woodNeed: this.woodNeed,
             packNeed: this.packNeed,
@@ -1137,7 +1189,7 @@ function populationCalc() {
                                .map(i => ({ ...i, qty: i.qty_per_min * row.machines }));
       row.byproducts = opt.outputs.filter(o => o.item !== item)
                                   .map(o => ({ ...o, qty: o.qty_per_min * row.machines }));
-      row.maintenance = opt.maintenance.map(m => ({ ...m, qty: m.rate_per_min * row.built }));
+      row.maintenance = this.mntOf(opt, row.built);
       return row;
     },
 
@@ -1167,12 +1219,87 @@ function populationCalc() {
       return out;
     },
 
+    // ── УКАЗЫ РАТУШИ ────────────────────────────────────────────────
+    //
+    // Указы не меняют формулы — они меняют исходные числа: сколько
+    // поселение ест, сколько родит поле и сколько уходит запчастей.
+    // Поэтому здесь только множители, а применяются они в тех же местах,
+    // где эти числа и берутся.
+    get edictFx() {
+      const sum = (key) => {
+        const e = this.edictList.find(x => x.key === key);
+        const lvl = Number(this.edicts[key]) || 0;
+        return e ? e.levels.slice(0, lvl).reduce((a, v) => a + v, 0) : 0;
+      };
+      // У «Экономии еды» уровни заданы отрицательными, поэтому просто сумма.
+      const yieldK = 1 + sum('farming_boost');
+      const waterK = 1 - sum('water_saver');
+      return {
+        food:  1 + sum('food_saver') + sum('plenty_of_food'),
+        item: {
+          'Household Goods':      1 + sum('more_goods'),
+          'Household Appliances': 1 + sum('more_appliances'),
+          'Consumer Electronics': 1 + sum('more_electronics'),
+        },
+        farmYield:   yieldK,
+        // Урожайность тянет за собой полив, экономия воды его снижает.
+        farmWater:   yieldK * waterK,
+        water:       waterK,
+        maintenance: 1 - sum('maintenance_reducer'),
+        cost: this.edictList.reduce(
+          (a, e) => a + Math.min(Number(this.edicts[e.key]) || 0, e.levels.length), 0),
+      };
+    },
+    edictName(e) {
+      return (window._popI18n || {})['edict_' + e.key] || e.key;
+    },
+    setEdict(key, level) {
+      this.edicts[key] = level;
+      this.applyEdicts();
+      this.save();
+    },
+    // Урожайность и полив — числа самого рецепта фермы, поэтому правим их
+    // прямо в загруженных данных: дальше весь расчёт идёт как обычно и
+    // ничего не знает про указы. Исходные значения храним рядом.
+    applyEdicts() {
+      const fx = this.edictFx;
+      const lists = Object.values(this.chain).map(c => c.options);
+      if (this.sapling && this.sapling.options) lists.push(this.sapling.options);
+      for (const n of this.needs) {
+        lists.push(n.options);
+        for (const nd of (n.tree || [])) lists.push(nd.options);
+      }
+      for (const list of lists) {
+        for (const o of (list || [])) {
+          if (!o.farm) continue;
+          if (o._rate0 === undefined) o._rate0 = o.rate;
+          o.rate = o._rate0 * fx.farmYield;
+          for (const i of (o.inputs || [])) {
+            if (i.item !== 'Water') continue;
+            if (i._q0 === undefined) i._q0 = i.qty_per_min;
+            i.qty_per_min = i._q0 * fx.farmWater;
+          }
+        }
+      }
+    },
+    // Запчасти уходят на обслуживание зданий, и указ снижает их расход.
+    mntOf(opt, built) {
+      const k = this.edictFx.maintenance;
+      return (opt.maintenance || []).map(m => ({ ...m, qty: m.rate_per_min * built * k }));
+    },
+
     baseQty(n) {
+      const fx = this.edictFx;
+      // Еда и три вида товаров меняются указами, вода — «Экономией воды».
+      let k = 1;
+      if (n.group_key === 'food') k = fx.food;
+      else if (fx.item[n.item] !== undefined) k = fx.item[n.item];
+      else if (n.item === 'Water') k = fx.water;
       if (n.food_group) {
         const sh = this.foodShares[n.id];
-        return sh ? sh.qty10k * this.population / 10000 : 0;
+        return sh ? sh.qty10k * k * this.population / 10000 : 0;
       }
-      return n.qty_per_10k * this.population / 10000;
+      return n.qty_per_10k * k * this.population / 10000;
     },
 
     foodShare(n) {
@@ -1357,8 +1484,10 @@ function populationCalc() {
     // закуски это её культура плюс масло, у масла — рапс или соя. По этой
     // цене и выстраивается очередь в развилке, руками её задавать не нужно.
     _cost(key, calc) {
+      // Указы входят в подпись: урожайность меняет цену варианта в земле.
       const sig = this.farm + '|' + this.fertilizer + '|'
-                + Object.keys(this.tiers).sort().map(k => k + this.tiers[k]).join(',');
+                + Object.keys(this.tiers).sort().map(k => k + this.tiers[k]).join(',')
+                + '|' + JSON.stringify(this.edicts);
       if (costCache.sig !== sig) { costCache.sig = sig; costCache.map = {}; }
       if (key in costCache.map) return costCache.map[key];
       costCache.map[key] = Infinity;          // страховка от цикла в графе
@@ -2294,7 +2423,7 @@ function populationCalc() {
         inputs: opt.inputs.map(i => ({ ...i, qty: i.qty_per_min * load })),
         byproducts: opt.outputs.filter(o => o.item !== item)
                               .map(o => ({ ...o, qty: o.qty_per_min * scale })),
-        maintenance: opt.maintenance.map(m => ({ ...m, qty: m.rate_per_min * built })),
+        maintenance: this.mntOf(opt, built),
         isCrop: c.is_crop, coItems: batch.filter(x => x !== item),
         fromSpare: !!fromSpare,
       };
@@ -2308,7 +2437,7 @@ function populationCalc() {
       return JSON.stringify([this.loading, this.needs.length, this.population,
         this.tiers, this.farm, this.fertilizer, this.choice, this.enabled,
         this.medicine, this.chainChoice, this.dispChoice,
-        this.woodNeed, this.packNeed]);
+        this.edicts, this.woodNeed, this.packNeed]);
     },
     get plan() {
       const sig = this.planSig;
@@ -3002,7 +3131,7 @@ function populationCalc() {
         inputs: opt.inputs.map(i => ({ ...i, qty: i.qty_per_min * machines })),
         byproducts: opt.outputs.filter(o => o.item !== item)
                               .map(o => ({ ...o, qty: o.qty_per_min * machines })),
-        maintenance: opt.maintenance.map(m => ({ ...m, qty: m.rate_per_min * built })),
+        maintenance: this.mntOf(opt, built),
         fromSpare: !!fromSpare, fert: true,
       };
     },
@@ -3082,7 +3211,7 @@ function populationCalc() {
         computing: machines * Math.max(0, -opt.computing_tf),
         inputs: [{ item: src.item, item_display: src.item_display, qty: src.qty }],
         byproducts: outs.slice(1),
-        maintenance: opt.maintenance.map(m => ({ ...m, qty: m.rate_per_min * built })),
+        maintenance: this.mntOf(opt, built),
         disposalOf: src.item,
       };
     },
