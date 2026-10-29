@@ -171,11 +171,17 @@
         <template x-for="f in families" :key="f.family">
           <div class="flex items-center gap-2">
             <span class="text-sm flex-1 min-w-0 truncate" x-text="f.display" :title="f.display"></span>
-            <select :value="tiers[f.family]" @change="setTier(f.family, Number($event.target.value))"
+            <!-- Выбранный уровень помечаем на самом пункте, а не через :value
+                 у списка: список сидит внутри x-for по семействам, и к моменту
+                 присвоения значения его пункты ещё не созданы — выбор не
+                 применялся, и список показывал первый уровень вместо
+                 сохранённого. -->
+            <select @change="setTier(f.family, Number($event.target.value))"
                     class="w-20 px-1.5 py-1 rounded border border-slate-300 dark:border-slate-600
                            bg-white dark:bg-slate-700 text-sm shrink-0">
               <template x-for="t in f.tiers" :key="t.tier">
-                <option :value="t.tier" x-text="romanOf(t.tier)"></option>
+                <option :value="t.tier" :selected="Number(t.tier) === Number(tiers[f.family])"
+                        x-text="romanOf(t.tier)"></option>
               </template>
             </select>
           </div>
@@ -1411,7 +1417,13 @@ function populationCalc() {
             best = Math.min(best, cost);
           }
         }
-        return isFinite(best) ? best : 0;
+        if (isFinite(best)) return best;
+        // Своих рецептов нет и побочно предмет не выходит — значит он
+        // приходит извне, земли под него не нужно. А вот если рецепты есть,
+        // но ни один не работает на выбранной ферме (тростник растёт только
+        // в теплице II), это не «бесплатно», а «нельзя»: иначе недоступный
+        // рецепт оказался бы самым дешёвым и его выбрали бы по умолчанию.
+        return this.kindsOf(item).length ? Infinity : 0;
       });
     },
     // Все роды рецептов предмета, от дешёвого к дорогому.
@@ -1489,7 +1501,10 @@ function populationCalc() {
       const others = kinds.filter(k => k !== kind).map(k => this.kindOption(item, k))
                           .filter(Boolean).map(names);
       if (others.length) {
-        const rest = names(o).filter(n => !others.every(list => list.includes(n)));
+        // Оставляем только то, чего нет ни в одном другом роде. Сравнивать со
+        // «всеми остальными» нельзя: у этанола кислород есть в двух рецептах
+        // из трёх, и подпись превращалась в перечисление всего состава.
+        const rest = names(o).filter(n => !others.some(list => list.includes(n)));
         if (rest.length) return rest.join(', ');
       }
       return o.kind_display && o.kind_display !== '—' ? o.kind_display : o.building_display;
