@@ -93,33 +93,84 @@
                     focus:outline-none focus:ring-2 focus:ring-blue-400">
     </div>
 
-    <!-- Древесина: сколько её нужно поселению. Отсюда берётся потребность
-         в саженцах, а те растут на тех же полях, что и культуры. -->
-    <div x-show="sapling">
-      <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
-        {{ t('population.wood_need') }}
-      </label>
-      <input type="number" min="0" step="10" x-model.number="draft.woodNeed"
-             @input="scheduleCommit()" @change="commitDrafts()"
-             @keydown.enter="commitDrafts()"
-             class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600
-                    bg-white dark:bg-slate-700 tabular-nums
-                    focus:outline-none focus:ring-2 focus:ring-blue-400">
-      <div x-show="saplingNeed > 0" class="text-xs text-slate-500 dark:text-slate-400 mt-1"
-           x-text="'{{ t('population.wood_saplings') }}'.replace('{n}', fmt(saplingNeed, 2))"></div>
-    </div>
+    <!-- Доп. производство: то, что выходит за рамки нужд поселения —
+         древесина, пайки, масло и этанол. Объём задаётся вручную и ложится
+         поверх той потребности, что цепочка уже считает. Свёрнуто по
+         умолчанию: объёмы задают немногие, а блоков слева стало много. -->
+    <div>
+      <button type="button" @click="extraOpen = !extraOpen"
+              class="w-full flex items-center gap-1.5 text-xs font-semibold uppercase
+                     tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+        <svg class="w-3 h-3 shrink-0 transition-transform" viewBox="0 0 20 20"
+             fill="currentColor" :class="extraOpen ? '' : '-rotate-90'">
+          <path d="M4 6.5h12L10 14z"></path>
+        </svg>
+        {{ t('population.extras') }}
+        <span x-show="extrasCount > 0"
+              class="ml-auto normal-case font-semibold text-blue-600 dark:text-blue-400"
+              x-text="'+' + extrasCount"></span>
+      </button>
+      <div x-show="extraOpen" class="space-y-3 mb-1">
 
-    <!-- Пайки: спрос задаётся руками, потребности населения у них нет. -->
-    <div x-show="chain['Food Pack']">
-      <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
-        {{ t('population.packs_need') }}
-      </label>
-      <input type="number" min="0" step="5" x-model.number="draft.packNeed"
-             @input="scheduleCommit()" @change="commitDrafts()"
-             @keydown.enter="commitDrafts()"
-             class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600
-                    bg-white dark:bg-slate-700 tabular-nums
-                    focus:outline-none focus:ring-2 focus:ring-blue-400">
+        <!-- Древесина: отсюда берётся потребность в саженцах, а те растут
+             на тех же полях, что и культуры. -->
+        <div x-show="sapling">
+          <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+            {{ t('population.wood_need') }}
+          </label>
+          <input type="number" min="0" step="10" x-model.number="draft.woodNeed"
+                 @input="scheduleCommit()" @change="commitDrafts()"
+                 @keydown.enter="commitDrafts()"
+                 class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600
+                        bg-white dark:bg-slate-700 tabular-nums
+                        focus:outline-none focus:ring-2 focus:ring-blue-400">
+          <div x-show="saplingNeed > 0" class="text-xs text-slate-500 dark:text-slate-400 mt-1"
+               x-text="'{{ t('population.wood_saplings') }}'.replace('{n}', fmt(saplingNeed, 2))"></div>
+        </div>
+
+        <!-- Пайки: спрос задаётся руками, потребности населения у них нет. -->
+        <div x-show="chain['Food Pack']">
+          <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+            {{ t('population.packs_need') }}
+          </label>
+          <input type="number" min="0" step="5" x-model.number="draft.packNeed"
+                 @input="scheduleCommit()" @change="commitDrafts()"
+                 @keydown.enter="commitDrafts()"
+                 class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600
+                        bg-white dark:bg-slate-700 tabular-nums
+                        focus:outline-none focus:ring-2 focus:ring-blue-400">
+        </div>
+
+        <!-- Масло: давится на мельнице из рапса и сои; применение — за
+             пределами нужд поселения. -->
+        <div x-show="chain['Cooking Oil']">
+          <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+            {{ t('population.oil_need') }}
+          </label>
+          <input type="number" min="0" step="5" x-model.number="draft.oilNeed"
+                 @input="scheduleCommit()" @change="commitDrafts()"
+                 @keydown.enter="commitDrafts()"
+                 class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600
+                        bg-white dark:bg-slate-700 tabular-nums
+                        focus:outline-none focus:ring-2 focus:ring-blue-400">
+        </div>
+
+        <!-- Этанол: медикаментам его нужно немного, здесь задаётся остальное.
+             Ферментёр гонит его из тростника и кукурузы — тех же культур. -->
+        <div x-show="chain['Ethanol']">
+          <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+            {{ t('population.ethanol_need') }}
+          </label>
+          <input type="number" min="0" step="5" x-model.number="draft.ethanolNeed"
+                 @input="scheduleCommit()" @change="commitDrafts()"
+                 @keydown.enter="commitDrafts()"
+                 class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600
+                        bg-white dark:bg-slate-700 tabular-nums
+                        focus:outline-none focus:ring-2 focus:ring-blue-400">
+        </div>
+
+        <p class="text-xs text-slate-400 dark:text-slate-500" x-text="_popI18n.extras_hint"></p>
+      </div>
     </div>
 
     <!-- Уровень лекарств: объём потребления одинаков на всех уровнях,
@@ -205,6 +256,102 @@
            x-text="edictFx.cost
                    ? (_popI18n.edicts_cost || '').replace('{n}', edictFx.cost)
                    : _popI18n.edicts_hint"></p>
+      </div>
+    </div>
+
+    <!-- Фокус Офиса: офисы копят фокус, фокусом разово покупаются бонусы.
+         Уровней много (у урожая — 150), поэтому не список, а число. -->
+    <div x-show="focusList.length">
+      <button type="button" @click="focusOpen = !focusOpen"
+              class="w-full flex items-center gap-1.5 text-xs font-semibold uppercase
+                     tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+        <svg class="w-3 h-3 shrink-0 transition-transform" viewBox="0 0 20 20"
+             fill="currentColor" :class="focusOpen ? '' : '-rotate-90'">
+          <path d="M4 6.5h12L10 14z"></path>
+        </svg>
+        {{ t('population.focus') }}
+        <span x-show="focusCost > 0"
+              class="ml-auto normal-case font-semibold text-amber-600 dark:text-amber-400 tabular-nums"
+              x-text="fmt(focusCost, 0)"></span>
+      </button>
+      <div x-show="focusOpen" class="space-y-1.5 mb-1">
+        <template x-for="f in focusList" :key="f.key">
+          <div class="flex items-center gap-2">
+            <span class="text-sm flex-1 min-w-0 truncate"
+                  x-text="focusName(f)" :title="focusName(f)"></span>
+            <input type="number" min="0" step="1"
+                   :value="Number(focus[f.key]) || 0"
+                   @change="setFocus(f.key, $event.target.value)"
+                   class="w-16 px-1.5 py-1 rounded border border-slate-300 dark:border-slate-600
+                          bg-white dark:bg-slate-700 text-sm shrink-0 tabular-nums
+                          focus:outline-none focus:ring-2 focus:ring-blue-400">
+          </div>
+        </template>
+        <p class="text-xs text-slate-400 dark:text-slate-500 pt-0.5"
+           x-text="focusCost > 0
+                   ? (_popI18n.focus_cost || '').replace('{n}', fmt(focusCost, 0))
+                   : _popI18n.focus_hint"></p>
+      </div>
+    </div>
+
+    <!-- Единство: поселение производит его за каждую удовлетворённую услугу.
+         Бонус за комфорт жилья умножает услуги, разнообразие еды — нет.
+         Цифра в заголовке — итог: производство минус содержание указов. -->
+    <div x-show="!loading">
+      <button type="button" @click="unityOpen = !unityOpen"
+              class="w-full flex items-center gap-1.5 text-xs font-semibold uppercase
+                     tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+        <svg class="w-3 h-3 shrink-0 transition-transform" viewBox="0 0 20 20"
+             fill="currentColor" :class="unityOpen ? '' : '-rotate-90'">
+          <path d="M4 6.5h12L10 14z"></path>
+        </svg>
+        {{ t('population.unity') }}
+        <span class="ml-auto normal-case font-semibold tabular-nums"
+              :class="unity.net >= 0 ? 'text-emerald-600 dark:text-emerald-400'
+                                     : 'text-amber-600 dark:text-amber-400'"
+              x-text="(unity.net >= 0 ? '+' : '−') + fmt(unity.net, 1)"></span>
+      </button>
+      <div x-show="unityOpen" class="space-y-2 mb-1">
+
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+            {{ t('population.unity_housing') }}
+          </label>
+          <select :value="unityHousing" @change="setHousing(Number($event.target.value))"
+                  class="w-full px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600
+                         bg-white dark:bg-slate-700 text-sm
+                         focus:outline-none focus:ring-2 focus:ring-blue-400">
+            <template x-for="(b, i) in UNITY_HOUSING" :key="i">
+              <option :value="i" :selected="Number(unityHousing) === i"
+                      x-text="housingLabel(i)"></option>
+            </template>
+          </select>
+        </div>
+
+        <div class="text-xs text-slate-500 dark:text-slate-400 space-y-0.5">
+          <template x-for="l in unity.lines" :key="l.label">
+            <div class="flex justify-between gap-2">
+              <span class="truncate" x-text="l.label" :title="l.label"></span>
+              <span class="tabular-nums shrink-0" x-text="'+' + fmt(l.value, 2)"></span>
+            </div>
+          </template>
+        </div>
+
+        <div class="pt-1 border-t border-slate-100 dark:border-slate-700 space-y-0.5 text-xs">
+          <div class="flex justify-between text-slate-500 dark:text-slate-400">
+            <span>{{ t('population.unity_production') }}</span>
+            <span class="tabular-nums" x-text="'+' + fmt(unity.production, 2)"></span>
+          </div>
+          <div class="flex justify-between text-slate-500 dark:text-slate-400" x-show="unity.costs > 0">
+            <span>{{ t('population.unity_costs') }}</span>
+            <span class="tabular-nums" x-text="'−' + fmt(unity.costs, 0)"></span>
+          </div>
+          <div class="flex justify-between font-semibold">
+            <span>{{ t('population.unity_net') }}</span>
+            <span class="tabular-nums"
+                  x-text="(unity.net >= 0 ? '+' : '−') + fmt(unity.net, 2)"></span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -797,15 +944,24 @@ function populationCalc() {
     sapling:     null,// саженцы: те же фермы, что и у культур
     woodNeed:    0,   // сколько древесины нужно поселению, единиц в минуту
     packNeed:    0,   // сколько пайков нужно, единиц в минуту
+    oilNeed:     0,   // дополнительное масло, единиц в минуту
+    ethanolNeed: 0,   // дополнительный этанол, единиц в минуту
     // Числовые поля пишут сюда, а в расчёт значение уходит по выходу из
     // поля или через три секунды тишины. Иначе каждая набранная цифра
     // пересчитывала бы весь план, и панель заметно подтормаживала.
-    draft:      { population: 10000, woodNeed: 0, packNeed: 0 },
+    draft:      { population: 10000, woodNeed: 0, packNeed: 0,
+                  oilNeed: 0, ethanolNeed: 0 },
     isDark:     document.documentElement.classList.contains('dark'),
     chainChoice: {},  // предмет -> упорядоченные роды рецептов
     edictList:  [],   // каталог указов Ратуши из данных
     edicts:     {},   // ключ указа -> выбранный уровень (0 — выключен)
     edictsOpen: false,
+    focusList:  [],   // каталог фокусов Офиса из данных
+    focus:      {},   // ключ фокуса -> купленный уровень (0 — не куплен)
+    focusOpen:  false,
+    extraOpen:  false,
+    unityHousing: 0,  // шаг комфорта жилья: индекс в UNITY_HOUSING
+    unityOpen:  false,
     farms:      [],   // справочник ферм и применимых на них удобрений
     farm:       null, // выбранная ферма (одна на всё поселение)
     fertilizer: null, // выбранное удобрение (одно на все фермы)
@@ -828,6 +984,7 @@ function populationCalc() {
       this.fert       = data.fert || {};
       this.sapling    = data.sapling || null;
       this.edictList  = data.edicts || [];
+      this.focusList  = data.focuses || [];
       if (this.farms.length) {
         // По умолчанию самая продуктивная связка: старшая теплица и
         // сильнейшее удобрение.
@@ -864,8 +1021,12 @@ function populationCalc() {
       if (p.collapsed)  Object.assign(this.collapsed, p.collapsed);
       if (p.dispChoice) Object.assign(this.dispChoice, p.dispChoice);
       if (p.edicts)     Object.assign(this.edicts, p.edicts);
+      if (p.focus)      Object.assign(this.focus, p.focus);
+      if ('unityHousing' in p) this.unityHousing = p.unityHousing;
       if (p.woodNeed)   this.woodNeed = p.woodNeed;
       if (p.packNeed)   this.packNeed = p.packNeed;
+      if (p.oilNeed)    this.oilNeed = p.oilNeed;
+      if (p.ethanolNeed) this.ethanolNeed = p.ethanolNeed;
       if (Array.isArray(p.sectionOrder) && p.sectionOrder.length) {
         // Порядок мог устареть: добавился раздел или исчез. Берём известные
         // ключи из сохранённого порядка, остальные дописываем следом.
@@ -875,7 +1036,7 @@ function populationCalc() {
       }
       if ('medicine' in p) this.medicine = p.medicine;
 
-      for (const k of ['population', 'woodNeed', 'packNeed']) this.draft[k] = this[k];
+      for (const k of ['population', 'woodNeed', 'packNeed', 'oilNeed', 'ethanolNeed']) this.draft[k] = this[k];
       this.applyEdicts();
       this.loading = false;
     },
@@ -900,7 +1061,7 @@ function populationCalc() {
     commitDrafts() {
       clearTimeout(this._commitTimer);
       let changed = false;
-      for (const k of ['population', 'woodNeed', 'packNeed']) {
+      for (const k of ['population', 'woodNeed', 'packNeed', 'oilNeed', 'ethanolNeed']) {
         const v = Math.max(0, Number(this.draft[k]) || 0);
         if (this[k] !== v) { this[k] = v; changed = true; }
       }
@@ -921,7 +1082,9 @@ function populationCalc() {
             chainChoice: this.chainChoice, edicts: this.edicts,
             sectionOrder: this.sectionOrder, collapsed: this.collapsed,
             dispChoice: this.dispChoice, woodNeed: this.woodNeed,
-            packNeed: this.packNeed,
+            packNeed: this.packNeed, oilNeed: this.oilNeed,
+            ethanolNeed: this.ethanolNeed, focus: this.focus,
+            unityHousing: this.unityHousing,
           })}),
         }).catch(() => {});
       }, 600);
@@ -1231,23 +1394,40 @@ function populationCalc() {
         const lvl = Number(this.edicts[key]) || 0;
         return e ? e.levels.slice(0, lvl).reduce((a, v) => a + v, 0) : 0;
       };
+      // Уровень фокуса Офиса: без каталога — 0, выше максимума не бывает.
+      const fLvl = (key) => {
+        const f = this.focusList.find(x => x.key === key);
+        return f ? Math.max(0, Math.min(Number(this.focus[key]) || 0, f.levels)) : 0;
+      };
+      // Фокус складывается с указами: обе шкалы — проценты от исходных чисел.
+      const foodFx  = fLvl('focus_food')  * -0.02;   // «Потребление еды»
+      const goodsFx = fLvl('focus_goods') * -0.02;   // «Потребление товаров»
+      const cropFx  = fLvl('focus_crop')  *  0.02;   // «Урожайность полей»
       // У «Экономии еды» уровни заданы отрицательными, поэтому просто сумма.
-      const yieldK = 1 + sum('farming_boost');
+      const yieldK = 1 + sum('farming_boost') + cropFx;
       const waterK = 1 - sum('water_saver');
       return {
-        food:  1 + sum('food_saver') + sum('plenty_of_food'),
+        food:  1 + sum('food_saver') + sum('plenty_of_food') + foodFx,
         item: {
-          'Household Goods':      1 + sum('more_goods'),
-          'Household Appliances': 1 + sum('more_appliances'),
-          'Consumer Electronics': 1 + sum('more_electronics'),
+          'Household Goods':      1 + sum('more_goods') + goodsFx,
+          'Household Appliances': 1 + sum('more_appliances') + goodsFx,
+          'Consumer Electronics': 1 + sum('more_electronics') + goodsFx,
+          'Luxury Goods':         1 + goodsFx,
         },
         farmYield:   yieldK,
         // Урожайность тянет за собой полив, экономия воды его снижает.
         farmWater:   yieldK * waterK,
         water:       waterK,
         maintenance: 1 - sum('maintenance_reducer'),
+        // Фокус «Производство Единства»: +2,5% за уровень ко всему производству.
+        unity:       1 + fLvl('focus_unity') * 0.025,
+        // «Изобилие еды» Единство даёт, а не тратит, — в стоимость не входит.
         cost: this.edictList.reduce(
-          (a, e) => a + Math.min(Number(this.edicts[e.key]) || 0, e.levels.length), 0),
+          (a, e) => a + (e.unity_gain ? 0
+                        : Math.min(Number(this.edicts[e.key]) || 0, e.levels.length)), 0),
+        gain: this.edictList.reduce(
+          (a, e) => a + Math.min(Number(this.edicts[e.key]) || 0, e.levels.length)
+                     * (e.unity_gain || 0), 0),
       };
     },
     edictName(e) {
@@ -1257,6 +1437,34 @@ function populationCalc() {
       this.edicts[key] = level;
       this.applyEdicts();
       this.save();
+    },
+
+    // ── ФОКУС ОФИСА ──────────────────────────────────────────────────
+    focusName(f) {
+      return (window._popI18n || {})[f.key] || f.key;
+    },
+    setFocus(key, level) {
+      const f = this.focusList.find(x => x.key === key);
+      const v = Math.max(0, Math.min(Number(level) || 0, f ? f.levels : 0));
+      this.focus[key] = v;
+      // Урожайность правится в загруженных данных, поэтому применяем заново.
+      this.applyEdicts();
+      this.save();
+    },
+    // Покупка разовая: уровень L стоит initial + increment*(L-1),
+    // L уровней — сумма арифметической прогрессии.
+    focusCostOf(f, lvl) {
+      const L = Math.max(0, Math.min(Number(lvl) || 0, f.levels));
+      return L * f.initial + f.increment * L * (L - 1) / 2;
+    },
+    get focusCost() {
+      return this.focusList.reduce(
+        (a, f) => a + this.focusCostOf(f, Number(this.focus[f.key]) || 0), 0);
+    },
+    // Сколько позиций доп. производства задано — бейдж в заголовке блока.
+    get extrasCount() {
+      return [this.woodNeed, this.packNeed, this.oilNeed, this.ethanolNeed]
+        .filter(v => v > 1e-9).length;
     },
     // Урожайность и полив — числа самого рецепта фермы, поэтому правим их
     // прямо в загруженных данных: дальше весь расчёт идёт как обычно и
@@ -1286,6 +1494,96 @@ function populationCalc() {
     mntOf(opt, built) {
       const k = this.edictFx.maintenance;
       return (opt.maintenance || []).map(m => ({ ...m, qty: m.rate_per_min * built * k }));
+    },
+
+    // ── ЕДИНСТВО ─────────────────────────────────────────────────────
+    // Нормы — Единства в месяц на 1000 жителей при полностью закрытой
+    // услуге. Базовая еда и все услуги умножаются на бонус жилья, бонус
+    // за разнообразие еды — нет. Источник: wiki.coigame.com/Settlement.
+    UNITY_FOOD: {
+      'Potato': 0.15, 'Corn': 0.15, 'Bread': 0.30, 'Meat': 0.40, 'Eggs': 0.30,
+      'Tofu': 0.30, 'Sausage': 0.10, 'Vegetables': 0.20, 'Fruit': 0.30,
+      'Snack': 0.25, 'Cake': 0.55,
+    },
+    UNITY_SERVICE: {
+      'Electricity': 1.20, 'Water': 1.00, 'Household Goods': 1.40,
+      'Household Appliances': 1.40, 'Luxury Goods': 1.00,
+      'Consumer Electronics': 1.80, 'Computing': 1.00,
+    },
+    UNITY_MEDICINE: {
+      'Medical Supplies': 0.50, 'Medical Supplies II': 0.75,
+      'Medical Supplies III': 1.20,
+    },
+    // Шаги комфорта жилья: без модулей, +электричество и вода, +ширпотреб,
+    // +техника, +электроника. Спрос поселения они не поднимают — растут
+    // только нормы Единства за услуги.
+    UNITY_HOUSING: [0, 0.50, 0.75, 1.00, 1.25],
+    housingLabel(i) {
+      return (window._popI18n || {})['unity_housing_' + i] || '';
+    },
+    setHousing(i) {
+      this.unityHousing = Math.max(0, Math.min(i, this.UNITY_HOUSING.length - 1));
+      this.save();
+    },
+    // Потребность включена и активна (лекарства — только выбранного уровня).
+    needOn(item) {
+      const n = this.needs.find(x => x.item === item);
+      return !!(n && this.enabled[n.id] && this.isActive(n));
+    },
+    get unity() {
+      const fx = this.edictFx;
+      const raw = [];
+      // Еда: базовая услуга 1.00 плюс строчка за каждый вид еды.
+      const foods = this.needs.filter(n =>
+        n.group_key === 'food' && this.needOn(n.item) && this.baseQty(n) > 1e-9);
+      if (foods.length) {
+        raw.push({ label: (window._popI18n || {}).unity_food_base, v: 1.00, boosted: true });
+      }
+      const variety = foods.reduce((a, n) => a + (this.UNITY_FOOD[n.item] || 0), 0);
+      if (variety > 0) {
+        raw.push({ label: (window._popI18n || {}).unity_variety, v: variety, boosted: false });
+      }
+      // Указы «Больше …» поднимают Единство своей услуги на 15% за уровень.
+      const moreOf = {
+        'Household Goods': 'more_goods',
+        'Household Appliances': 'more_appliances',
+        'Consumer Electronics': 'more_electronics',
+      };
+      for (const [item, base] of Object.entries(this.UNITY_SERVICE)) {
+        if (!this.needOn(item)) continue;
+        // Бонус за воду дают, только если стоки отводятся.
+        if (item === 'Water' && !this.needOn('Waste Water')) continue;
+        let v = base;
+        const mk = moreOf[item];
+        if (mk) {
+          const e = this.edictList.find(x => x.key === mk);
+          const lvl = Math.min(Number(this.edicts[mk]) || 0, e ? e.levels.length : 0);
+          v *= 1 + lvl * ((e && e.unity_bonus) || 0);
+        }
+        raw.push({ label: this.needName(this.needs.find(x => x.item === item)),
+                   v, boosted: true });
+      }
+      const med = this.needs.find(n => n.choice_group === 'medicine' && n.id === this.medicine);
+      if (med && this.needOn(med.item)) {
+        raw.push({ label: this.needName(med),
+                   v: this.UNITY_MEDICINE[med.item] || 0, boosted: true });
+      }
+      // «Изобилие еды» — единственный указ-производитель: +1 за уровень.
+      if (fx.gain > 0) {
+        raw.push({ label: (window._popI18n || {}).edict_plenty_of_food,
+                   v: fx.gain, boosted: false, flat: true });
+      }
+      const h = this.UNITY_HOUSING[this.unityHousing] || 0;
+      const scale = this.population / 1000;
+      const per1000 = raw.reduce(
+        (a, l) => a + (l.flat ? 0 : l.v * (l.boosted ? 1 + h : 1)), 0);
+      const production = per1000 * scale * fx.unity + fx.gain;
+      const lines = raw.map(l => ({
+        label: l.label,
+        value: l.flat ? l.v : l.v * (l.boosted ? 1 + h : 1) * scale * fx.unity,
+      }));
+      const costs = fx.cost;
+      return { lines, production, costs, net: production - costs };
     },
 
     baseQty(n) {
@@ -1813,6 +2111,16 @@ function populationCalc() {
       if (packs > 1e-9 && this.chain['Food Pack']) {
         add(demand, 'Food Pack', packs);
         addSrc('Food Pack', '{{ t('population.packs') }}', packs);
+      }
+      // 1в. Доп. производство: масло и этанол задаются руками и ложатся
+      // поверх той потребности, что у цепочки уже есть (этанол нужен
+      // дезинфицирующему, масло — снекам и пирогам).
+      for (const [it, q] of [['Cooking Oil', this.oilNeed],
+                             ['Ethanol', this.ethanolNeed]]) {
+        if (q > 1e-9 && this.chain[it]) {
+          add(demand, it, q);
+          addSrc(it, '{{ t('population.extra_source') }}', q);
+        }
       }
       // 2. Мак и сахар нужны медикаментам — их спрос приходит извне цепочки.
       for (const r of (medicineRows || [])) {
@@ -2437,7 +2745,8 @@ function populationCalc() {
       return JSON.stringify([this.loading, this.needs.length, this.population,
         this.tiers, this.farm, this.fertilizer, this.choice, this.enabled,
         this.medicine, this.chainChoice, this.dispChoice,
-        this.edicts, this.woodNeed, this.packNeed]);
+        this.edicts, this.focus, this.woodNeed, this.packNeed,
+        this.oilNeed, this.ethanolNeed]);
     },
     get plan() {
       const sig = this.planSig;

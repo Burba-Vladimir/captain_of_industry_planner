@@ -351,3 +351,30 @@ def test_food_is_no_longer_hidden(client, db_conn):
     finally:
         with db_conn.cursor() as cur:
             cur.execute("DELETE FROM population_needs WHERE label = 'ТестЕда'")
+
+
+def test_edicts_and_focuses_catalogs(client):
+    """Каталоги указов и фокусов Офиса приходят целиком.
+
+    Проверяем по статическим каталогам, а не по живым данным: на чистой
+    схеме в CI игровые таблицы пусты, а эти константы живут в коде.
+    """
+    data = client.get("/api/population/data").get_json()
+
+    edicts = {e["key"]: e for e in data["edicts"]}
+    assert "food_saver" in edicts
+    assert "plenty_of_food" in edicts
+    # «Изобилие еды» Единство производит, а не тратит: по +1 за уровень.
+    assert edicts["plenty_of_food"].get("unity_gain") == 1
+    # Указы «Больше …» поднимают Единство своей услуги на 15% за уровень.
+    assert edicts["more_goods"].get("unity_bonus") == 0.15
+
+    focuses = {f["key"]: f for f in data["focuses"]}
+    assert set(focuses) == {"focus_food", "focus_goods", "focus_crop", "focus_unity"}
+    ff = focuses["focus_food"]
+    assert ff["levels"] == 15
+    assert ff["per_level"] == -0.02
+    assert ff["initial"] == 75 and ff["increment"] == 100
+    fc = focuses["focus_crop"]
+    assert fc["levels"] == 150 and fc["per_level"] == 0.02
+    assert fc["initial"] == 50 and fc["increment"] == 10
