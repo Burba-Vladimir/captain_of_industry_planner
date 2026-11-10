@@ -169,7 +169,6 @@
                         focus:outline-none focus:ring-2 focus:ring-blue-400">
         </div>
 
-        <p class="text-xs text-slate-400 dark:text-slate-500" x-text="_popI18n.extras_hint"></p>
       </div>
     </div>
 
@@ -250,17 +249,11 @@
             </select>
           </div>
         </template>
-        <!-- Текст берём из словаря, а не подставляем в атрибут: в английском
-             «Captain's Office» апостроф закрывал бы строку выражения. -->
-        <p class="text-xs text-slate-400 dark:text-slate-500 pt-0.5"
-           x-text="edictFx.cost
-                   ? (_popI18n.edicts_cost || '').replace('{n}', edictFx.cost)
-                   : _popI18n.edicts_hint"></p>
       </div>
     </div>
 
-    <!-- Фокус Офиса: офисы копят фокус, фокусом разово покупаются бонусы.
-         Уровней много (у урожая — 150), поэтому не список, а число. -->
+    <!-- Бонусы Офиса покупаются накопленным фокусом. Уровней много
+         (у урожая — 150), поэтому не список, а число. -->
     <div x-show="focusList.length">
       <button type="button" @click="focusOpen = !focusOpen"
               class="w-full flex items-center gap-1.5 text-xs font-semibold uppercase
@@ -270,9 +263,6 @@
           <path d="M4 6.5h12L10 14z"></path>
         </svg>
         {{ t('population.focus') }}
-        <span x-show="focusCost > 0"
-              class="ml-auto normal-case font-semibold text-amber-600 dark:text-amber-400 tabular-nums"
-              x-text="fmt(focusCost, 0)"></span>
       </button>
       <div x-show="focusOpen" class="space-y-1.5 mb-1">
         <template x-for="f in focusList" :key="f.key">
@@ -287,71 +277,6 @@
                           focus:outline-none focus:ring-2 focus:ring-blue-400">
           </div>
         </template>
-        <p class="text-xs text-slate-400 dark:text-slate-500 pt-0.5"
-           x-text="focusCost > 0
-                   ? (_popI18n.focus_cost || '').replace('{n}', fmt(focusCost, 0))
-                   : _popI18n.focus_hint"></p>
-      </div>
-    </div>
-
-    <!-- Единство: поселение производит его за каждую удовлетворённую услугу.
-         Бонус за комфорт жилья умножает услуги, разнообразие еды — нет.
-         Цифра в заголовке — итог: производство минус содержание указов. -->
-    <div x-show="!loading">
-      <button type="button" @click="unityOpen = !unityOpen"
-              class="w-full flex items-center gap-1.5 text-xs font-semibold uppercase
-                     tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
-        <svg class="w-3 h-3 shrink-0 transition-transform" viewBox="0 0 20 20"
-             fill="currentColor" :class="unityOpen ? '' : '-rotate-90'">
-          <path d="M4 6.5h12L10 14z"></path>
-        </svg>
-        {{ t('population.unity') }}
-        <span class="ml-auto normal-case font-semibold tabular-nums"
-              :class="unity.net >= 0 ? 'text-emerald-600 dark:text-emerald-400'
-                                     : 'text-amber-600 dark:text-amber-400'"
-              x-text="(unity.net >= 0 ? '+' : '−') + fmt(unity.net, 1)"></span>
-      </button>
-      <div x-show="unityOpen" class="space-y-2 mb-1">
-
-        <div>
-          <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
-            {{ t('population.unity_housing') }}
-          </label>
-          <select :value="unityHousing" @change="setHousing(Number($event.target.value))"
-                  class="w-full px-2 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600
-                         bg-white dark:bg-slate-700 text-sm
-                         focus:outline-none focus:ring-2 focus:ring-blue-400">
-            <template x-for="(b, i) in UNITY_HOUSING" :key="i">
-              <option :value="i" :selected="Number(unityHousing) === i"
-                      x-text="housingLabel(i)"></option>
-            </template>
-          </select>
-        </div>
-
-        <div class="text-xs text-slate-500 dark:text-slate-400 space-y-0.5">
-          <template x-for="l in unity.lines" :key="l.label">
-            <div class="flex justify-between gap-2">
-              <span class="truncate" x-text="l.label" :title="l.label"></span>
-              <span class="tabular-nums shrink-0" x-text="'+' + fmt(l.value, 2)"></span>
-            </div>
-          </template>
-        </div>
-
-        <div class="pt-1 border-t border-slate-100 dark:border-slate-700 space-y-0.5 text-xs">
-          <div class="flex justify-between text-slate-500 dark:text-slate-400">
-            <span>{{ t('population.unity_production') }}</span>
-            <span class="tabular-nums" x-text="'+' + fmt(unity.production, 2)"></span>
-          </div>
-          <div class="flex justify-between text-slate-500 dark:text-slate-400" x-show="unity.costs > 0">
-            <span>{{ t('population.unity_costs') }}</span>
-            <span class="tabular-nums" x-text="'−' + fmt(unity.costs, 0)"></span>
-          </div>
-          <div class="flex justify-between font-semibold">
-            <span>{{ t('population.unity_net') }}</span>
-            <span class="tabular-nums"
-                  x-text="(unity.net >= 0 ? '+' : '−') + fmt(unity.net, 2)"></span>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -394,6 +319,16 @@
       <div class="flex justify-between text-sm">
         <span class="text-slate-500 dark:text-slate-400">{{ t('population.total_workers') }}</span>
         <span class="font-semibold tabular-nums" x-text="fmt(totals.workers, 0)"></span>
+      </div>
+      <div class="flex justify-between items-center text-sm">
+        <span class="inline-flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+          <img src="/static/icons/Unity.png" alt="" class="w-4 h-4 shrink-0" @error="$el.style.display='none'">
+          {{ t('population.unity') }}
+        </span>
+        <span class="font-semibold tabular-nums"
+              :class="unity.net >= 0 ? 'text-emerald-600 dark:text-emerald-400'
+                                     : 'text-amber-600 dark:text-amber-400'"
+              x-text="(unity.net >= 0 ? '+' : '−') + fmt(unity.net, 1)"></span>
       </div>
       <div class="pt-2 border-t border-slate-100 dark:border-slate-700">
         <div class="text-xs text-slate-500 dark:text-slate-400 mb-1">{{ t('population.total_maintenance') }}</div>
@@ -669,20 +604,80 @@
 
           <!-- Плитки сводки -->
           <template x-if="sec.type === 'chips'">
-          <div class="p-3 flex flex-wrap gap-2">
-            <template x-for="i in sec.items" :key="i.item || i.item_display">
-              <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-sm whitespace-nowrap"
-                    :class="sec.key === 'outputs' ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/25 dark:border-emerald-700'
-                                                  : 'border-slate-200 dark:border-slate-600'">
-                <template x-if="i.item">
-                  <img :src="iconOf(i.item)" alt="" class="w-4 h-4" @error="$el.style.display='none'">
+          <div class="p-3">
+            <div class="flex flex-wrap gap-2">
+              <template x-for="i in sec.items" :key="i.item || i.item_display">
+                <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-sm whitespace-nowrap"
+                      :class="sec.key === 'outputs' ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/25 dark:border-emerald-700'
+                                                    : 'border-slate-200 dark:border-slate-600'">
+                  <template x-if="i.item">
+                    <img :src="iconOf(i.item)" alt="" class="w-4 h-4" @error="$el.style.display='none'">
+                  </template>
+                  <span x-text="i.item_display"></span>
+                  <template x-if="!i.unknown">
+                    <span class="tabular-nums font-semibold" x-text="fmt(i.qty, 2)"></span>
+                  </template>
+                </span>
+              </template>
+            </div>
+
+            <!-- Доп. производство: куда сколько ушло. Расшифровка в том же
+                 стиле, что и происхождение потребности у строк цепочки. -->
+            <template x-for="d in sec.items.filter(i => (i.dests || []).length)"
+                      :key="'dests-' + d.item">
+              <div class="mt-3 max-w-xl text-sm pl-3 border-l-2 border-emerald-300 dark:border-emerald-700">
+                <div class="flex items-center gap-1.5 font-semibold mb-0.5">
+                  <img :src="iconOf(d.item)" alt="" class="w-4 h-4 shrink-0" @error="$el.style.display='none'">
+                  <span x-text="d.item_display"></span>
+                  <span class="tabular-nums font-normal text-slate-500 dark:text-slate-400"
+                        x-text="fmt(d.made, 2) + ' ' + unitLabel('per_min')"></span>
+                </div>
+                <template x-for="l in d.dests" :key="d.item + '-' + l.label">
+                  <div class="flex justify-between gap-4 py-0.5 border-b border-dashed
+                              border-slate-100 dark:border-slate-700">
+                    <span :class="l.out ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : ''"
+                          x-text="l.label"></span>
+                    <span class="tabular-nums shrink-0" x-text="fmt(l.qty, 2)"></span>
+                  </div>
                 </template>
-                <span x-text="i.item_display"></span>
-                <template x-if="!i.unknown">
-                  <span class="tabular-nums font-semibold" x-text="fmt(i.qty, 2)"></span>
-                </template>
-              </span>
+              </div>
             </template>
+          </div>
+          </template>
+
+          <!-- Единство: построчный заработок поселения -->
+          <template x-if="sec.type === 'unity'">
+            <div class="p-3 max-w-xl">
+              <template x-for="l in unity.lines" :key="l.label">
+                <div class="flex justify-between items-center gap-3 py-1
+                            border-b border-dashed border-slate-100 dark:border-slate-700">
+                  <span class="inline-flex items-center gap-1.5 min-w-0">
+                    <template x-if="l.icon">
+                      <img :src="iconOf(l.icon)" alt="" class="w-4 h-4 shrink-0" @error="$el.style.display='none'">
+                    </template>
+                    <span class="truncate" x-text="l.label" :title="l.label"></span>
+                  </span>
+                  <span class="tabular-nums shrink-0" x-text="'+' + fmt(l.value, 2)"></span>
+                </div>
+              </template>
+              <div class="pt-2 space-y-1 text-sm">
+                <div class="flex justify-between text-slate-500 dark:text-slate-400">
+                  <span>{{ t('population.unity_production') }}</span>
+                  <span class="tabular-nums" x-text="'+' + fmt(unity.production, 2)"></span>
+                </div>
+                <div class="flex justify-between text-slate-500 dark:text-slate-400" x-show="unity.costs > 0">
+                  <span>{{ t('population.unity_costs') }}</span>
+                  <span class="tabular-nums" x-text="'−' + fmt(unity.costs, 0)"></span>
+                </div>
+                <div class="flex justify-between font-semibold">
+                  <span>{{ t('population.unity_net') }}</span>
+                  <span class="tabular-nums"
+                        :class="unity.net >= 0 ? 'text-emerald-600 dark:text-emerald-400'
+                                               : 'text-amber-600 dark:text-amber-400'"
+                        x-text="(unity.net >= 0 ? '+' : '−') + fmt(unity.net, 2)"></span>
+                </div>
+              </div>
+            </div>
           </template>
 
           <!-- Поля и переработка -->
@@ -956,19 +951,17 @@ function populationCalc() {
     edictList:  [],   // каталог указов Ратуши из данных
     edicts:     {},   // ключ указа -> выбранный уровень (0 — выключен)
     edictsOpen: false,
-    focusList:  [],   // каталог фокусов Офиса из данных
-    focus:      {},   // ключ фокуса -> купленный уровень (0 — не куплен)
+    focusList:  [],   // каталог бонусов Офиса из данных
+    focus:      {},   // ключ бонуса -> купленный уровень (0 — не куплен)
     focusOpen:  false,
     extraOpen:  false,
-    unityHousing: 0,  // шаг комфорта жилья: индекс в UNITY_HOUSING
-    unityOpen:  false,
     farms:      [],   // справочник ферм и применимых на них удобрений
     farm:       null, // выбранная ферма (одна на всё поселение)
     fertilizer: null, // выбранное удобрение (одно на все фермы)
     enabled:    {},   // need.id -> считать
     medicine:   null,
     sectionOrder: ['grown', 'food', 'fertilizer', 'utility',
-                   'health', 'goods', 'industrial', 'outputs'],
+                   'health', 'goods', 'unity', 'industrial', 'outputs'],
     dispChoice: {},   // способ переработки -> выбранное здание
     collapsed:  {},   // ключ раздела -> свёрнут
     dragKey:    null, // раздел, который сейчас тащат
@@ -1022,7 +1015,6 @@ function populationCalc() {
       if (p.dispChoice) Object.assign(this.dispChoice, p.dispChoice);
       if (p.edicts)     Object.assign(this.edicts, p.edicts);
       if (p.focus)      Object.assign(this.focus, p.focus);
-      if ('unityHousing' in p) this.unityHousing = p.unityHousing;
       if (p.woodNeed)   this.woodNeed = p.woodNeed;
       if (p.packNeed)   this.packNeed = p.packNeed;
       if (p.oilNeed)    this.oilNeed = p.oilNeed;
@@ -1084,7 +1076,6 @@ function populationCalc() {
             dispChoice: this.dispChoice, woodNeed: this.woodNeed,
             packNeed: this.packNeed, oilNeed: this.oilNeed,
             ethanolNeed: this.ethanolNeed, focus: this.focus,
-            unityHousing: this.unityHousing,
           })}),
         }).catch(() => {});
       }, 600);
@@ -1127,6 +1118,8 @@ function populationCalc() {
       }
       by.grown = { key: 'grown', title: '{{ t('population.cat_grown') }}',
                    type: 'grown', filled: this.farmLayout.farms > 0 };
+      by.unity = { key: 'unity', title: '{{ t('population.unity') }}',
+                   type: 'unity', filled: this.unity.lines.length > 0 };
       const out = [];
       for (const k of this.sectionOrder) if (by[k]) { out.push(by[k]); delete by[k]; }
       return [...out, ...Object.values(by)];
@@ -1451,16 +1444,6 @@ function populationCalc() {
       this.applyEdicts();
       this.save();
     },
-    // Покупка разовая: уровень L стоит initial + increment*(L-1),
-    // L уровней — сумма арифметической прогрессии.
-    focusCostOf(f, lvl) {
-      const L = Math.max(0, Math.min(Number(lvl) || 0, f.levels));
-      return L * f.initial + f.increment * L * (L - 1) / 2;
-    },
-    get focusCost() {
-      return this.focusList.reduce(
-        (a, f) => a + this.focusCostOf(f, Number(this.focus[f.key]) || 0), 0);
-    },
     // Сколько позиций доп. производства задано — бейдж в заголовке блока.
     get extrasCount() {
       return [this.woodNeed, this.packNeed, this.oilNeed, this.ethanolNeed]
@@ -1514,17 +1497,6 @@ function populationCalc() {
       'Medical Supplies': 0.50, 'Medical Supplies II': 0.75,
       'Medical Supplies III': 1.20,
     },
-    // Шаги комфорта жилья: без модулей, +электричество и вода, +ширпотреб,
-    // +техника, +электроника. Спрос поселения они не поднимают — растут
-    // только нормы Единства за услуги.
-    UNITY_HOUSING: [0, 0.50, 0.75, 1.00, 1.25],
-    housingLabel(i) {
-      return (window._popI18n || {})['unity_housing_' + i] || '';
-    },
-    setHousing(i) {
-      this.unityHousing = Math.max(0, Math.min(i, this.UNITY_HOUSING.length - 1));
-      this.save();
-    },
     // Потребность включена и активна (лекарства — только выбранного уровня).
     needOn(item) {
       const n = this.needs.find(x => x.item === item);
@@ -1537,13 +1509,14 @@ function populationCalc() {
       const foods = this.needs.filter(n =>
         n.group_key === 'food' && this.needOn(n.item) && this.baseQty(n) > 1e-9);
       if (foods.length) {
-        raw.push({ label: (window._popI18n || {}).unity_food_base, v: 1.00, boosted: true });
+        raw.push({ label: (window._popI18n || {}).unity_food_base, v: 1.00 });
       }
       const variety = foods.reduce((a, n) => a + (this.UNITY_FOOD[n.item] || 0), 0);
       if (variety > 0) {
-        raw.push({ label: (window._popI18n || {}).unity_variety, v: variety, boosted: false });
+        raw.push({ label: (window._popI18n || {}).unity_variety, v: variety });
       }
-      // Указы «Больше …» поднимают Единство своей услуги на 15% за уровень.
+      // Бонус к Единству привязан к заработку своего ресурса: указы
+      // «Больше …» поднимают Единство своей услуги на 15% за уровень.
       const moreOf = {
         'Household Goods': 'more_goods',
         'Household Appliances': 'more_appliances',
@@ -1561,26 +1534,24 @@ function populationCalc() {
           v *= 1 + lvl * ((e && e.unity_bonus) || 0);
         }
         raw.push({ label: this.needName(this.needs.find(x => x.item === item)),
-                   v, boosted: true });
+                   icon: item, v });
       }
       const med = this.needs.find(n => n.choice_group === 'medicine' && n.id === this.medicine);
       if (med && this.needOn(med.item)) {
-        raw.push({ label: this.needName(med),
-                   v: this.UNITY_MEDICINE[med.item] || 0, boosted: true });
+        raw.push({ label: this.needName(med), icon: med.item,
+                   v: this.UNITY_MEDICINE[med.item] || 0 });
       }
       // «Изобилие еды» — единственный указ-производитель: +1 за уровень.
       if (fx.gain > 0) {
         raw.push({ label: (window._popI18n || {}).edict_plenty_of_food,
-                   v: fx.gain, boosted: false, flat: true });
+                   v: fx.gain, flat: true });
       }
-      const h = this.UNITY_HOUSING[this.unityHousing] || 0;
       const scale = this.population / 1000;
-      const per1000 = raw.reduce(
-        (a, l) => a + (l.flat ? 0 : l.v * (l.boosted ? 1 + h : 1)), 0);
+      const per1000 = raw.reduce((a, l) => a + (l.flat ? 0 : l.v), 0);
       const production = per1000 * scale * fx.unity + fx.gain;
       const lines = raw.map(l => ({
-        label: l.label,
-        value: l.flat ? l.v : l.v * (l.boosted ? 1 + h : 1) * scale * fx.unity,
+        label: l.label, icon: l.icon || null,
+        value: l.flat ? l.v : l.v * scale * fx.unity,
       }));
       const costs = fx.cost;
       return { lines, production, costs, net: production - costs };
@@ -3631,6 +3602,9 @@ function populationCalc() {
         const key = i.item || i.item_display;
         if (!bag[key]) bag[key] = { item: i.item, item_display: i.item_display, qty: 0, unknown: false };
         if (i.qty === null) bag[key].unknown = true; else bag[key].qty += i.qty;
+        // Расшифровка «куда сколько ушло» живёт на чипе доп. производства.
+        if (i.made !== undefined) bag[key].made = i.made;
+        if (i.dests) bag[key].dests = i.dests;
       };
       const plan = this.plan;
       const rows = plan.all;
@@ -3686,15 +3660,55 @@ function populationCalc() {
         add(out, { item: r.item, item_display: r.item_display, qty: r.qty });
         for (const o of (r.byproducts || [])) add(out, o);
       }
-      // Древесину растим сами: покупаем только то, чего не хватило,
-      // а что осталось сверх внутреннего расхода — показываем на выходе.
+      // Древесина, масло и этанол: производство «под заказ» — саженцы,
+      // мельницы и ферментёры. Внутренний расход расписываем по
+      // потребителям, излишек уходит «на выход».
+      const consumersOf = (name) => {
+        const list = [];
+        for (const r of rows) {
+          if (r.off || r.item === name) continue;
+          for (const i of (r.inputs || [])) {
+            if (i.item !== name || !(i.qty > 1e-9)) continue;
+            const cur = list.find(x => x.label === r.item_display);
+            if (cur) cur.qty += i.qty;
+            else list.push({ label: r.item_display, qty: i.qty });
+          }
+        }
+        return list.sort((a, b) => b.qty - a.qty);
+      };
+      const madeOf = (name) => {
+        let qty = 0, disp = name;
+        for (const r of rows) {
+          if (r.item !== name || r.off) continue;
+          qty += r.qty || 0;
+          disp = r.item_display || name;
+        }
+        return { qty, disp };
+      };
       const wood = this.woodNeed;
       if (wood > 1e-9) {
-        const used = ind['Wood'] ? ind['Wood'].qty : 0;
-        const disp = ind['Wood'] ? ind['Wood'].item_display : 'Wood';
+        const cons = consumersOf('Wood');
+        const used = cons.reduce((a, c) => a + c.qty, 0);
+        const disp = (ind['Wood'] || {}).item_display || 'Wood';
         delete ind['Wood'];
-        if (wood > used + 1e-9) add(out, { item: 'Wood', item_display: disp, qty: wood - used });
-        else if (used > wood + 1e-9) add(ind, { item: 'Wood', item_display: disp, qty: used - wood });
+        if (wood > used + 1e-9) {
+          const left = wood - used;
+          cons.push({ label: '{{ t('population.to_output') }}', qty: left, out: true });
+          add(out, { item: 'Wood', item_display: disp, qty: left, made: wood, dests: cons });
+        } else if (used > wood + 1e-9) {
+          add(ind, { item: 'Wood', item_display: disp, qty: used - wood });
+        }
+      }
+      for (const it of ['Cooking Oil', 'Ethanol']) {
+        const want = it === 'Cooking Oil' ? this.oilNeed : this.ethanolNeed;
+        if (!(want > 1e-9)) continue;
+        const made = madeOf(it);
+        const cons = consumersOf(it);
+        const left = made.qty - cons.reduce((a, c) => a + c.qty, 0);
+        if (left > 1e-9) {
+          cons.push({ label: '{{ t('population.to_output') }}', qty: left, out: true });
+          add(out, { item: it, item_display: made.disp, qty: left, made: made.qty, dests: cons });
+        }
       }
       // Что из этого забрали удобрения, на выходе уже не лежит.
       for (const r of rows) {
