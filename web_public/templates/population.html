@@ -398,6 +398,36 @@
         <template x-if="!collapsed[sec.key]">
         <div>
 
+          <!-- Древесина: первой строкой «Доп. производства». Саженцы уходят
+               в деревья один к одному, дерево даёт двадцать древесины;
+               излишек саженцев идёт в переработку. -->
+          <template x-if="sec.key === 'extras' && woodNeed > 0">
+            <div class="m-3 rounded-lg border border-slate-200 dark:border-slate-600 px-3 py-2">
+              <div class="flex flex-wrap items-start gap-3">
+                <div class="min-w-40">
+                  <div class="flex items-center gap-1.5">
+                    <img :src="iconOf('Wood')" alt="" class="w-4 h-4"
+                         @error="$el.style.display='none'">
+                    <span>{{ t('population.wood') }}</span>
+                  </div>
+                  <div class="text-lg font-semibold tabular-nums"
+                       x-text="fmt(woodNeed, 2) + ' ' + unitLabel('per_min')"></div>
+                </div>
+                <div class="min-w-56 flex-1 text-sm text-slate-500 dark:text-slate-400"
+                     x-text="'{{ t('population.wood_note') }}'.replace('{n}', WOOD_PER_TREE)"></div>
+              </div>
+              <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                <span class="inline-flex items-center gap-1 whitespace-nowrap">
+                  <img :src="iconOf('Tree Sapling')" alt="" class="w-4 h-4"
+                       @error="$el.style.display='none'">
+                  <span x-text="sapling ? sapling.item_display : ''"></span>
+                  <span class="tabular-nums text-slate-500 dark:text-slate-400"
+                        x-text="fmt(saplingNeed, 2)"></span>
+                </span>
+              </div>
+            </div>
+          </template>
+
           <!-- Карточки производства. В «Доп. производстве» каждая корневая
                цепочка живёт в своей рамке. -->
           <template x-if="sec.type === 'rows'">
@@ -613,43 +643,19 @@
 
           <!-- Плитки сводки -->
           <template x-if="sec.type === 'chips'">
-          <div class="p-3">
-            <div class="flex flex-wrap gap-2">
-              <template x-for="i in sec.items" :key="i.item || i.item_display">
-                <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-sm whitespace-nowrap"
-                      :class="sec.key === 'outputs' ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/25 dark:border-emerald-700'
-                                                    : 'border-slate-200 dark:border-slate-600'">
-                  <template x-if="i.item">
-                    <img :src="iconOf(i.item)" alt="" class="w-4 h-4" @error="$el.style.display='none'">
-                  </template>
-                  <span x-text="i.item_display"></span>
-                  <template x-if="!i.unknown">
-                    <span class="tabular-nums font-semibold" x-text="fmt(i.qty, 2)"></span>
-                  </template>
-                </span>
-              </template>
-            </div>
-
-            <!-- Доп. производство на выходе: куда сколько ушло. Расшифровка
-                 в том же стиле, что и происхождение потребности у строк. -->
-            <template x-for="d in sec.items.filter(i => (i.dests || []).length)"
-                      :key="'dests-' + d.item">
-              <div class="mt-3 max-w-xl text-sm pl-3 border-l-2 border-emerald-300 dark:border-emerald-700">
-                <div class="flex items-center gap-1.5 font-semibold mb-0.5">
-                  <img :src="iconOf(d.item)" alt="" class="w-4 h-4 shrink-0" @error="$el.style.display='none'">
-                  <span x-text="d.item_display"></span>
-                  <span class="tabular-nums font-normal text-slate-500 dark:text-slate-400"
-                        x-text="fmt(d.made, 2) + ' ' + unitLabel('per_min')"></span>
-                </div>
-                <template x-for="l in d.dests" :key="d.item + '-' + l.label">
-                  <div class="flex justify-between gap-4 py-0.5 border-b border-dashed
-                              border-slate-100 dark:border-slate-700">
-                    <span :class="l.out ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : ''"
-                          x-text="l.label"></span>
-                    <span class="tabular-nums shrink-0" x-text="fmt(l.qty, 2)"></span>
-                  </div>
+          <div class="p-3 flex flex-wrap gap-2">
+            <template x-for="i in sec.items" :key="i.item || i.item_display">
+              <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-sm whitespace-nowrap"
+                    :class="sec.key === 'outputs' ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/25 dark:border-emerald-700'
+                                                  : 'border-slate-200 dark:border-slate-600'">
+                <template x-if="i.item">
+                  <img :src="iconOf(i.item)" alt="" class="w-4 h-4" @error="$el.style.display='none'">
                 </template>
-              </div>
+                <span x-text="i.item_display"></span>
+                <template x-if="!i.unknown">
+                  <span class="tabular-nums font-semibold" x-text="fmt(i.qty, 2)"></span>
+                </template>
+              </span>
             </template>
           </div>
           </template>
@@ -690,10 +696,9 @@
           </template>
 
           <!-- Поля и переработка -->
-          <!-- Выращиваемое, древесина и переработка излишков переехали
-               в «Доп. производство» целиком, как были. -->
-          <template x-if="sec.key === 'extras'">
-            <div class="p-3 space-y-4 border-t border-slate-100 dark:border-slate-700">
+          <!-- Выращиваемое: поля и сводная таблица. -->
+          <template x-if="sec.type === 'grown'">
+            <div class="p-3 space-y-4">
               <div class="flex flex-wrap items-baseline gap-x-2 text-sm">
                 <span class="text-slate-500 dark:text-slate-400">{{ t('population.fields_total') }}</span>
                 <span class="text-lg font-semibold tabular-nums" x-text="farmLayout.farms"></span>
@@ -792,40 +797,37 @@
                   </tfoot>
                 </table>
               </div>
+            </div>
+          </template>
 
-              <!-- Древесина: саженцы уходят в деревья один к одному,
-                   дерево даёт двадцать древесины. Ровно столько, сколько
-                   заказано слева, — излишек саженцев идёт в переработку. -->
-              <div x-show="woodNeed > 0" class="space-y-2 pt-1">
-                <div class="text-xs font-semibold uppercase tracking-wide
-                            text-slate-500 dark:text-slate-400">
-                  {{ t('population.wood') }}
-                </div>
+          <!-- Доп. производство: короткие тайлы того, что расписано
+               в «Еде», и переработка излишков. -->
+          <template x-if="sec.key === 'extras'">
+            <div class="p-3 space-y-3"
+                 :class="(sec.rows || []).length ? 'border-t border-slate-100 dark:border-slate-700' : ''">
+
+              <template x-for="s in extrasShort" :key="'short-' + s.item">
                 <div class="rounded-lg border border-slate-200 dark:border-slate-600 px-3 py-2">
-                  <div class="flex flex-wrap items-start gap-3">
-                    <div class="min-w-40">
-                      <div class="flex items-center gap-1.5">
-                        <img :src="iconOf('Wood')" alt="" class="w-4 h-4"
-                             @error="$el.style.display='none'">
-                        <span>{{ t('population.wood') }}</span>
-                      </div>
-                      <div class="text-lg font-semibold tabular-nums"
-                           x-text="fmt(woodNeed, 2) + ' ' + unitLabel('per_min')"></div>
-                    </div>
-                    <div class="min-w-56 flex-1 text-sm text-slate-500 dark:text-slate-400"
-                         x-text="'{{ t('population.wood_note') }}'.replace('{n}', WOOD_PER_TREE)"></div>
-                  </div>
-                  <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1">
-                    <span class="inline-flex items-center gap-1 whitespace-nowrap">
-                      <img :src="iconOf('Tree Sapling')" alt="" class="w-4 h-4"
-                           @error="$el.style.display='none'">
-                      <span x-text="sapling ? sapling.item_display : ''"></span>
-                      <span class="tabular-nums text-slate-500 dark:text-slate-400"
-                            x-text="fmt(saplingNeed, 2)"></span>
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span class="inline-flex items-center gap-1.5 font-semibold whitespace-nowrap">
+                      <img :src="iconOf(s.item)" alt="" class="w-4 h-4" @error="$el.style.display='none'">
+                      <span x-text="s.item_display"></span>
+                      <span class="tabular-nums" x-text="fmt(s.made, 2)"></span>
+                      <span class="text-slate-500 dark:text-slate-400">{{ t('population.unit_per_min') }}</span>
+                    </span>
+                    <span class="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+                      <template x-for="l in s.dests" :key="s.item + l.label">
+                        <span class="inline-flex items-center gap-1 whitespace-nowrap"
+                              :class="l.out ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                                            : 'text-slate-500 dark:text-slate-400'">
+                          <span x-text="l.label"></span>
+                          <span class="tabular-nums" x-text="fmt(l.qty, 2)"></span>
+                        </span>
+                      </template>
                     </span>
                   </div>
                 </div>
-              </div>
+              </template>
 
               <!-- Переработка. Режем по производимому, а не по сырью: важно,
                    сколько строить биореакторов и смесителей. -->
@@ -971,7 +973,7 @@ function populationCalc() {
     fertilizer: null, // выбранное удобрение (одно на все фермы)
     enabled:    {},   // need.id -> считать
     medicine:   null,
-    sectionOrder: ['food', 'extras', 'fertilizer', 'utility',
+    sectionOrder: ['grown', 'food', 'extras', 'fertilizer', 'utility',
                    'health', 'goods', 'unity', 'industrial', 'outputs'],
     dispChoice: {},   // способ переработки -> выбранное здание
     collapsed:  {},   // ключ раздела -> свёрнут
@@ -1103,6 +1105,9 @@ function populationCalc() {
       }, 600);
     },
 
+    // Короткие тайлы допов: то, что расписано в «Еде», сжато до сводки.
+    get extrasShort() { return this.plan.extrasShort || []; },
+
     // ── вспомогательное ─────────────────────────────────────────────
     fmt(v, d) {
       if (v === null || v === undefined || !isFinite(v)) return '—';
@@ -1138,12 +1143,16 @@ function populationCalc() {
         by[k] = { key: k, title: c.name, type: 'chips',
                   items: c.items, filled: c.items.length > 0 };
       }
+      by.grown = { key: 'grown', title: '{{ t('population.cat_grown') }}',
+                   type: 'grown', filled: this.farmLayout.farms > 0 };
       by.unity = { key: 'unity', title: '{{ t('population.unity') }}',
                    type: 'unity', filled: this.unity.lines.length > 0 };
-      // «Доп. производство» — это ещё и выращиваемое с переработкой:
-      // поле может быть непустым и без карточек.
+      // «Доп. производство» непусто и без карточек: древесина, короткие
+      // тайлы и переработка тоже его наполняют.
       if (by.extras) by.extras.filled = by.extras.filled
-                                    || this.farmLayout.farms > 0;
+                                    || this.woodNeed > 1e-9
+                                    || this.extrasShort.length > 0
+                                    || this.recycling.length > 0;
       const out = [];
       for (const k of this.sectionOrder) if (by[k]) { out.push(by[k]); delete by[k]; }
       return [...out, ...Object.values(by)];
@@ -1171,11 +1180,14 @@ function populationCalc() {
     startDrag(key) {
       this.dragKey = key;
       this.dropTarget = null;
-      // Пока тащат, сворачиваем все: развёрнутые занимают по экрану
-      // каждый, и целиться некуда. После броска возвращаем как было:
-      // свёрнутые остаются свёрнутыми, развёрнутые разворачиваются.
       this._collapsedBefore = { ...this.collapsed };
-      this.collapsed = Object.fromEntries(this.sectionOrder.map(k => [k, true]));
+      // DOM нельзя трогать прямо внутри dragstart: Chromium из-за этого
+      // срывает drag-сессию, и перетаскивание умирает на корню. Сворачиваем
+      // в следующем кадре — к этому моменту сессия уже началась.
+      requestAnimationFrame(() => {
+        if (!this.dragKey) return;
+        this.collapsed = Object.fromEntries(this.sectionOrder.map(k => [k, true]));
+      });
     },
     overSection(key) {
       // Порядок меняем один раз, на отпускании: живая перестановка во
@@ -1581,6 +1593,13 @@ function populationCalc() {
       const raw = [];
       raw.push({ label: (window._popI18n || {}).unity_housing,
                  text: '+' + Math.round(H * 100) + '%' });
+      // Бонус Офиса на сбор Единства — тоже множитель, показываем его.
+      const uf = this.focusList.find(x => x.key === 'focus_unity');
+      const ulvl = Math.min(Number(this.focus['focus_unity']) || 0, uf ? uf.levels : 0);
+      if (ulvl > 0) {
+        raw.push({ label: (window._popI18n || {}).focus_unity,
+                   text: '+' + Math.round(ulvl * 2.5) + '%' });
+      }
       // Еда: базовая услуга 1.00 плюс строчка за каждый вид еды.
       // Бонус жилья умножает базу и услуги, но не отдельные продукты.
       const foods = this.needs.filter(n =>
@@ -2831,10 +2850,8 @@ function populationCalc() {
       // Еда считается балансировщиком: спрос на мак и сахар приходит от
       // медикаментов, поэтому их строки нужны раньше.
       const fp = this.buildFoodPlan(medicine);
-      // Заголовок подраздела вешаем на первую строку пайков.
-      const packRows = (fp.packs || []).map((r, i) =>
-        i === 0 ? { ...r, subTitle: '{{ t('population.packs') }}' } : r);
       // Пайки — гости «Еды»: живут в «Доп. производстве».
+      const packRows = fp.packs || [];
       const food = [...fp.tree];
 
       const waste = [];
@@ -3018,17 +3035,21 @@ function populationCalc() {
         }
         return { qty, disp };
       };
-      const extrasOut = [];
+      // Короткие тайлы: масло и этанол, расписанные в «Еде», — только
+      // сводка, куда уходит произведённое. Древесине тайл не нужен:
+      // её представление — карточка первой строкой этого раздела.
+      const extrasShort = [];
       for (const it of ['Cooking Oil', 'Ethanol']) {
         const want = it === 'Cooking Oil' ? this.oilNeed : this.ethanolNeed;
         if (!(want > 1e-9)) continue;
+        if (extrasRows.some(r => r.item === it)) continue;  // уже подробным тайлом
         const made = madeOf(it);
         const cons = consumersOf(it);
         const left = made.qty - cons.reduce((a, c) => a + c.qty, 0);
         if (left > 1e-9) {
           cons.push({ label: '{{ t('population.to_output') }}', qty: left, out: true });
-          extrasOut.push({ item: it, item_display: made.disp, qty: left,
-                           made: made.qty, dests: cons });
+          extrasShort.push({ item: it, item_display: made.disp,
+                             made: made.qty, dests: cons });
         }
       }
       const extras = mkSection('extras', '{{ t('population.extras') }}', extrasRows);
@@ -3044,7 +3065,7 @@ function populationCalc() {
       ];
 
       return { food, foodInfo: fp, medicine, goods, waste, utility, sections,
-               extrasOut, all: allRows };
+               extrasShort, all: allRows };
     },
 
     // Плоский список строк с уровнями режем на поддеревья по корням.
@@ -3756,9 +3777,6 @@ function populationCalc() {
         const key = i.item || i.item_display;
         if (!bag[key]) bag[key] = { item: i.item, item_display: i.item_display, qty: 0, unknown: false };
         if (i.qty === null) bag[key].unknown = true; else bag[key].qty += i.qty;
-        // Расшифровка «куда сколько ушло» живёт на чипе «на выходе».
-        if (i.made !== undefined) bag[key].made = i.made;
-        if (i.dests) bag[key].dests = i.dests;
       };
       const plan = this.plan;
       const rows = plan.all;
@@ -3822,8 +3840,6 @@ function populationCalc() {
         delete ind['Wood'];
         if (used > wood + 1e-9) add(ind, { item: 'Wood', item_display: disp, qty: used - wood });
       }
-      // Масло и этанол «под заказ»: чип на выходе с расшифровкой.
-      for (const e of (this.plan.extrasOut || [])) add(out, e);
       // Что из этого забрали удобрения, на выходе уже не лежит.
       for (const r of rows) {
         if (!r.fert || r.off) continue;
