@@ -372,14 +372,15 @@
                class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200
                       dark:border-slate-700"
                :class="[dragKey === sec.key ? 'ring-2 ring-blue-400 opacity-60' : '',
-                        dropTarget === sec.key ? 'ring-2 ring-blue-300' : '']"
-               @dragover.prevent="overSection(sec.key)" @drop.prevent>
+                        dropTarget && dropTarget.key === sec.key ? 'ring-2 ring-blue-300' : '']"
+               @dragover.prevent="overSection(sec.key, $event)" @drop.prevent>
         <div :data-tour="sec.key === 'grown' ? 'pop-sechead' : null"
              class="px-4 py-2 bg-slate-100 dark:bg-slate-700/50 border-b border-slate-200
                     dark:border-slate-700 text-sm font-semibold flex items-center gap-2
                     select-none cursor-move"
              :class="collapsed[sec.key] ? 'rounded-xl' : 'rounded-t-xl'"
-             draggable="true" @dragstart="startDrag(sec.key)" @dragend="endDrag()">
+             draggable="true" @dragstart="startDrag(sec.key, $event)"
+              @dragend="endDrag($event)">
           <button type="button" @click.stop="toggleSection(sec.key)"
                   :title="'{{ t('population.collapse') }}'"
                   class="w-5 h-5 flex items-center justify-center rounded shrink-0
@@ -446,6 +447,31 @@
                             text-slate-500 dark:text-slate-400 mb-2"
                      x-text="r.subTitle"></div>
 
+                <!-- Короткий тайл допов: без заводов и составов — только
+                     сколько производится и куда уходит. -->
+                <template x-if="r.short">
+                  <div>
+                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span class="inline-flex items-center gap-1.5 font-semibold whitespace-nowrap">
+                        <img :src="iconOf(r.item)" alt="" class="w-4 h-4" @error="$el.style.display='none'">
+                        <span x-text="r.short.item_display"></span>
+                        <span class="tabular-nums" x-text="fmt(r.short.made, 2)"></span>
+                        <span class="text-slate-500 dark:text-slate-400">{{ t('population.unit_per_min') }}</span>
+                      </span>
+                    </div>
+                    <div class="mt-1 text-sm max-w-xl pl-3 border-l-2 border-slate-200 dark:border-slate-600">
+                      <template x-for="l in r.short.dests" :key="r.item + '-' + l.label">
+                        <div class="flex justify-between gap-4 py-0.5 border-b border-dashed
+                                    border-slate-100 dark:border-slate-700">
+                          <span :class="l.out ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : ''"
+                                x-text="l.label"></span>
+                          <span class="tabular-nums shrink-0" x-text="fmt(l.qty, 2)"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+
                 <!-- Снятая с расчёта позиция: нули по всем колонкам ничего не
                      говорят, поэтому оставляем только галочку и название —
                      иначе позицию нечем вернуть в расчёт. -->
@@ -461,7 +487,7 @@
                   </label>
                 </template>
 
-                <template x-if="!r.off">
+                <template x-if="!r.off && !r.short">
                 <div>
                 <div class="flex flex-wrap items-start gap-3"
                      :style="r.level ? 'margin-left:' + (r.level * 18) + 'px' : ''">
@@ -800,34 +826,9 @@
             </div>
           </template>
 
-          <!-- Доп. производство: короткие тайлы того, что расписано
-               в «Еде», и переработка излишков. -->
+          <!-- Доп. производство: переработка излишков. -->
           <template x-if="sec.key === 'extras'">
-            <div class="p-3 space-y-3"
-                 :class="(sec.rows || []).length ? 'border-t border-slate-100 dark:border-slate-700' : ''">
-
-              <template x-for="s in extrasShort" :key="'short-' + s.item">
-                <div class="rounded-lg border border-slate-200 dark:border-slate-600 px-3 py-2">
-                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span class="inline-flex items-center gap-1.5 font-semibold whitespace-nowrap">
-                      <img :src="iconOf(s.item)" alt="" class="w-4 h-4" @error="$el.style.display='none'">
-                      <span x-text="s.item_display"></span>
-                      <span class="tabular-nums" x-text="fmt(s.made, 2)"></span>
-                      <span class="text-slate-500 dark:text-slate-400">{{ t('population.unit_per_min') }}</span>
-                    </span>
-                    <span class="flex flex-wrap gap-x-3 gap-y-1 text-sm">
-                      <template x-for="l in s.dests" :key="s.item + l.label">
-                        <span class="inline-flex items-center gap-1 whitespace-nowrap"
-                              :class="l.out ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
-                                            : 'text-slate-500 dark:text-slate-400'">
-                          <span x-text="l.label"></span>
-                          <span class="tabular-nums" x-text="fmt(l.qty, 2)"></span>
-                        </span>
-                      </template>
-                    </span>
-                  </div>
-                </div>
-              </template>
+            <div class="p-3 space-y-3">
 
               <!-- Переработка. Режем по производимому, а не по сырью: важно,
                    сколько строить биореакторов и смесителей. -->
@@ -1041,7 +1042,10 @@ function populationCalc() {
         const saved = p.sectionOrder.filter(k => known.includes(k));
         const order = [...saved];
         for (const m of known.filter(k => !saved.includes(k))) {
-          let at = order.length;
+          // Вставляем на место по умолчанию: за ближайшим предыдущим
+          // соседом, а если таких нет — в начало (иначе первый раздел
+          // уезжал в конец).
+          let at = 0;
           for (let i = known.indexOf(m) - 1; i >= 0; i--) {
             const j = order.indexOf(known[i]);
             if (j >= 0) { at = j + 1; break; }
@@ -1105,9 +1109,6 @@ function populationCalc() {
       }, 600);
     },
 
-    // Короткие тайлы допов: то, что расписано в «Еде», сжато до сводки.
-    get extrasShort() { return this.plan.extrasShort || []; },
-
     // ── вспомогательное ─────────────────────────────────────────────
     fmt(v, d) {
       if (v === null || v === undefined || !isFinite(v)) return '—';
@@ -1147,11 +1148,10 @@ function populationCalc() {
                    type: 'grown', filled: this.farmLayout.farms > 0 };
       by.unity = { key: 'unity', title: '{{ t('population.unity') }}',
                    type: 'unity', filled: this.unity.lines.length > 0 };
-      // «Доп. производство» непусто и без карточек: древесина, короткие
-      // тайлы и переработка тоже его наполняют.
+      // «Доп. производство» непусто и без карточек: древесина
+      // и переработка тоже его наполняют.
       if (by.extras) by.extras.filled = by.extras.filled
                                     || this.woodNeed > 1e-9
-                                    || this.extrasShort.length > 0
                                     || this.recycling.length > 0;
       const out = [];
       for (const k of this.sectionOrder) if (by[k]) { out.push(by[k]); delete by[k]; }
@@ -1177,9 +1177,10 @@ function populationCalc() {
       });
       return frames;
     },
-    startDrag(key) {
+    startDrag(key, e) {
       this.dragKey = key;
       this.dropTarget = null;
+      this._grab = e ? { x: e.clientX, y: e.clientY } : null;
       this._collapsedBefore = { ...this.collapsed };
       // DOM нельзя трогать прямо внутри dragstart: Chromium из-за этого
       // срывает drag-сессию, и перетаскивание умирает на корню. Сворачиваем
@@ -1189,20 +1190,40 @@ function populationCalc() {
         this.collapsed = Object.fromEntries(this.sectionOrder.map(k => [k, true]));
       });
     },
-    overSection(key) {
-      // Порядок меняем один раз, на отпускании: живая перестановка во
-      // время перетаскивания двигала DOM под курсором и срывала drag,
-      // когда все разделы были развёрнуты. Здесь только подсветка цели.
-      if (!this.dragKey || key === this.dragKey) return;
-      this.dropTarget = key;
+    overSection(key, e) {
+      // Порядок меняем один раз, на отпускании. Здесь только цель:
+      // верхняя половина раздела — вставить перед ним, нижняя — после.
+      // Свой раздел — цель нет: вернулся на место, менять ничего не надо.
+      if (!this.dragKey) return;
+      if (key === this.dragKey) { this.dropTarget = null; return; }
+      let half = 'before';
+      if (e && e.currentTarget) {
+        const r = e.currentTarget.getBoundingClientRect();
+        half = (e.clientY - r.top) < r.height / 2 ? 'before' : 'after';
+      }
+      if (!this.dropTarget || this.dropTarget.key !== key
+          || this.dropTarget.half !== half) {
+        this.dropTarget = { key, half };
+      }
     },
-    endDrag() {
-      if (this.dragKey && this.dropTarget) {
+    endDrag(e) {
+      // Отпустил там же, где взял (курсор почти не двигался) — порядок
+      // не трогаем: свёртывание разделов сдвигает страницу, и без этой
+      // проверки раздел менялся местами с соседом от одного захвата.
+      const moved = this._grab && e
+        ? Math.hypot(e.clientX - this._grab.x, e.clientY - this._grab.y) > 6
+        : true;
+      if (this.dragKey && this.dropTarget && moved) {
         const order = [...this.sectionOrder];
-        const from = order.indexOf(this.dragKey), to = order.indexOf(this.dropTarget);
-        if (from >= 0 && to >= 0 && from !== to) {
-          order.splice(to, 0, ...order.splice(from, 1));
-          this.sectionOrder = order;
+        const from = order.indexOf(this.dragKey);
+        order.splice(from, 1);
+        let to = order.indexOf(this.dropTarget.key);
+        if (to >= 0) {
+          if (this.dropTarget.half === 'after') to += 1;
+          if (to !== from) {
+            order.splice(to, 0, this.dragKey);
+            this.sectionOrder = order;
+          }
         }
       }
       if (this._collapsedBefore) {
@@ -1598,7 +1619,7 @@ function populationCalc() {
       const ulvl = Math.min(Number(this.focus['focus_unity']) || 0, uf ? uf.levels : 0);
       if (ulvl > 0) {
         raw.push({ label: (window._popI18n || {}).focus_unity,
-                   text: '+' + Math.round(ulvl * 2.5) + '%' });
+                   text: '+' + (ulvl * 2.5).toLocaleString('{{ lang }}') + '%' });
       }
       // Еда: базовая услуга 1.00 плюс строчка за каждый вид еды.
       // Бонус жилья умножает базу и услуги, но не отдельные продукты.
@@ -2972,6 +2993,10 @@ function populationCalc() {
       // в «Еде»/«Медикаментах» не встретились; иначе расписаны там.
       const extrasLbl = '{{ t('population.extra_source') }}';
       const extrasRows = [...packRows];
+      // Ветки масла/этанола «под заказ» из дерева медикаментов: сюда их
+      // складывает обход здоровья, а ставит на место цикл допов ниже —
+      // иначе этанол мог оказаться раньше масла.
+      const extraBranches = {};
       const extraRoot = (root) => {
         if (!['Cooking Oil', 'Ethanol'].includes(root.item)) return false;
         const want = root.item === 'Cooking Oil' ? this.oilNeed : this.ethanolNeed;
@@ -2984,8 +3009,8 @@ function populationCalc() {
       const health = [...medicine];
       for (const branch of this.splitRoots(fp.extra || [])) {
         const root = branch[0];
-        // Масло и этанол «под заказ» без внутреннего спроса живут здесь.
-        if (extraRoot(root)) { extrasRows.push(...branch); continue; }
+        // Масло и этанол «под заказ» без внутреннего спроса — в буфер.
+        if (extraRoot(root)) { extraBranches[root.item] = branch; continue; }
         const at = health.findIndex(m => m.opt && !m.off
                                       && m.opt.inputs.some(i => i.item === root.item));
         if (at < 0) { health.push(...branch); continue; }
@@ -2995,24 +3020,8 @@ function populationCalc() {
         health.splice(at + 1, 0, ...branch.map(r => ({ ...r, level: r.level + base })));
       }
 
-      // ── Доп. производство: карточки и чипы «на выход» ────────────
-      // Масло и этанол, встретившиеся в «Еде», расписаны там, и здесь их
-      // карточек нет. Если внутреннего спроса нет — карточка здесь, и
-      // тогда она одна: чип на выходе её не дублирует.
-      for (const it of ['Cooking Oil', 'Ethanol']) {
-        const want = it === 'Cooking Oil' ? this.oilNeed : this.ethanolNeed;
-        if (!(want > 1e-9)) continue;
-        const rowsIt = food.filter(r => r.item === it && !r.off);
-        if (!rowsIt.length) continue;
-        const internal = rowsIt.some(r => (r.parts || []).some(p => p.label !== extrasLbl));
-        if (!internal) {
-          for (const r of rowsIt) food.splice(food.indexOf(r), 1);
-          extrasRows.push(...rowsIt);
-        }
-      }
+      // ── Доп. производство ────────────────────────────────────────
       const allRows = [...base, computing, ...compChain, water, elec].filter(Boolean);
-      // Чипы «на выход» для масла и этанола: куда сколько ушло. Древесине
-      // чип не нужен — её представление, карточка, живёт в этом же разделе.
       const consumersOf = (name) => {
         const list = [];
         for (const r of allRows) {
@@ -3035,21 +3044,42 @@ function populationCalc() {
         }
         return { qty, disp };
       };
-      // Короткие тайлы: масло и этанол, расписанные в «Еде», — только
-      // сводка, куда уходит произведённое. Древесине тайл не нужен:
-      // её представление — карточка первой строкой этого раздела.
-      const extrasShort = [];
+      const dispIn = (name) => {
+        for (const r of allRows) for (const i of (r.inputs || []))
+          if (i.item === name && i.item_display) return i.item_display;
+        return name;
+      };
+      // Масло и этанол: с внутренним спросом — коротким тайлом здесь,
+      // без него — подробной карточкой (тоже здесь). Порядок неизменен:
+      // пайки, масло, этанол. Излишек сверх потребителей — «на выход».
+      const extrasOut = [];
       for (const it of ['Cooking Oil', 'Ethanol']) {
         const want = it === 'Cooking Oil' ? this.oilNeed : this.ethanolNeed;
         if (!(want > 1e-9)) continue;
-        if (extrasRows.some(r => r.item === it)) continue;  // уже подробным тайлом
         const made = madeOf(it);
         const cons = consumersOf(it);
         const left = made.qty - cons.reduce((a, c) => a + c.qty, 0);
+        if (left <= 1e-9) continue;
+        // Внутренний спрос есть, если кроме «на выход» есть потребители:
+        // этанол может сидеть не в «Еде», а в дереве медикаментов.
+        const internal = cons.some(c => !c.out);
+        cons.push({ label: '{{ t('population.to_output') }}', qty: left, out: true });
+        extrasOut.push({ item: it, item_display: made.disp, qty: left });
+        if (internal) {
+          extrasRows.push({ key: 'short:' + it, item: it,
+                            short: { item_display: made.disp, made: made.qty, dests: cons } });
+        } else {
+          const rowsIt = food.filter(r => r.item === it && !r.off);
+          for (const r of rowsIt) food.splice(food.indexOf(r), 1);
+          extrasRows.push(...(extraBranches[it] || rowsIt));
+        }
+      }
+      // Древесина: излишек сверх внутреннего расхода — на выход.
+      if (this.woodNeed > 1e-9) {
+        const cons = consumersOf('Wood');
+        const left = this.woodNeed - cons.reduce((a, c) => a + c.qty, 0);
         if (left > 1e-9) {
-          cons.push({ label: '{{ t('population.to_output') }}', qty: left, out: true });
-          extrasShort.push({ item: it, item_display: made.disp,
-                             made: made.qty, dests: cons });
+          extrasOut.push({ item: 'Wood', item_display: dispIn('Wood'), qty: left });
         }
       }
       const extras = mkSection('extras', '{{ t('population.extras') }}', extrasRows);
@@ -3065,7 +3095,7 @@ function populationCalc() {
       ];
 
       return { food, foodInfo: fp, medicine, goods, waste, utility, sections,
-               extrasShort, all: allRows };
+               extrasOut, all: allRows };
     },
 
     // Плоский список строк с уровнями режем на поддеревья по корням.
@@ -3840,6 +3870,8 @@ function populationCalc() {
         delete ind['Wood'];
         if (used > wood + 1e-9) add(ind, { item: 'Wood', item_display: disp, qty: used - wood });
       }
+      // Доп. производство: всё, что уходит на выход, — зелёными чипами.
+      for (const e of (this.plan.extrasOut || [])) add(out, e);
       // Что из этого забрали удобрения, на выходе уже не лежит.
       for (const r of rows) {
         if (!r.fert || r.off) continue;
