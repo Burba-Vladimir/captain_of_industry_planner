@@ -3049,12 +3049,15 @@ function populationCalc() {
           if (i.item === name && i.item_display) return i.item_display;
         return name;
       };
-      // Масло и этанол: с внутренним спросом — коротким тайлом здесь,
-      // без него — подробной карточкой (тоже здесь). Порядок неизменен:
-      // пайки, масло, этанол. Излишек сверх потребителей — «на выход».
+      // Пайки, масло и этанол: с внутренним спросом — коротким тайлом
+      // здесь, без него — подробной карточкой (тоже здесь). Порядок
+      // неизменен: пайки, масло, этанол. Излишек сверх потребителей —
+      // «на выход»; пайки внутри не потребляются никогда.
       const extrasOut = [];
-      for (const it of ['Cooking Oil', 'Ethanol']) {
-        const want = it === 'Cooking Oil' ? this.oilNeed : this.ethanolNeed;
+      const wantOf = { 'Food Pack': this.packNeed,
+                       'Cooking Oil': this.oilNeed, 'Ethanol': this.ethanolNeed };
+      for (const it of ['Food Pack', 'Cooking Oil', 'Ethanol']) {
+        const want = wantOf[it];
         if (!(want > 1e-9)) continue;
         const made = madeOf(it);
         const cons = consumersOf(it);
