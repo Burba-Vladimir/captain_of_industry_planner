@@ -1473,7 +1473,6 @@ def api_population_data():
         {"key": "farming_boost",   "effect": "farm_yield", "levels": [0.15, 0.12, 0.08]},
         # Вода экономится и в поселении, и на фермах.
         {"key": "water_saver",     "effect": "water",      "levels": [0.15, 0.12, 0.08]},
-        {"key": "maintenance_reducer", "effect": "maintenance", "levels": [0.15, 0.10, 0.05]},
     ]
 
     # Фокус Офиса (Office I–III). Офисы копят фокус из рабочих и канцтоваров,
