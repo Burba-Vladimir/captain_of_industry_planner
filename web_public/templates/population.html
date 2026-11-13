@@ -16,7 +16,9 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script>tailwind.config = { darkMode: 'class' };</script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
-  <style>[x-cloak] { display: none !important; }</style>
+  <style>[x-cloak] { display: none !important; }
+         /* Куда проматывать раздел: ниже шапки и навигации по разделам */
+         main section[data-key] { scroll-margin-top: calc(var(--hdr, 52px) + 44px); }</style>
 </head>
 
 <script>
@@ -357,6 +359,25 @@
 
   <!-- ── ПРАВАЯ ЧАСТЬ ────────────────────────────────────────────────── -->
   <main class="space-y-4">
+    <!-- Навигация по разделам: не сворачивается, липнет под шапкой.
+         Разделов стало много — по кнопкам можно позиционироваться. -->
+    <div x-show="!loading" x-cloak
+         class="sticky z-10 -mt-2 top-[var(--hdr,52px)] py-1.5
+                bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur
+                border-b border-slate-200 dark:border-slate-700">
+      <div class="flex gap-1.5 overflow-x-auto pb-0.5">
+        <template x-for="s in panels.filter(p => p.filled)" :key="'nav-' + s.key">
+          <button type="button" @click="jumpTo(s.key)"
+                  class="shrink-0 px-2.5 py-1 rounded-lg text-xs font-semibold
+                         border border-slate-200 dark:border-slate-600
+                         bg-white dark:bg-slate-800 whitespace-nowrap
+                         hover:border-blue-400 hover:text-blue-600
+                         dark:hover:text-blue-300 transition-colors"
+                  x-text="s.title"></button>
+        </template>
+      </div>
+    </div>
+
     <div x-show="loading" class="text-center py-16 text-slate-400">{{ t('population.loading') }}</div>
 
     <!-- ── РАЗДЕЛЫ ──────────────────────────────────────
@@ -368,6 +389,7 @@
            границу раздела и оказалось бы обрезано. Углы шапке скругляем
            отдельно, иначе её фон вылезал бы за скруглённую рамку. -->
       <section x-show="!loading && sec.filled"
+               :data-key="sec.key"
                :data-tour="sec.key === 'outputs' ? 'pop-outputs' : null"
                class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200
                       dark:border-slate-700"
@@ -983,6 +1005,15 @@ function populationCalc() {
     picker:     null, // открытая развилка: { item, on: [отмеченные роды] }
 
     async init() {
+      // Высота шапки — под неё липнет навигация по разделам; при переносе
+      // строк шапка меняет высоту, поэтому меряем, а не угадываем.
+      const syncHdr = () => {
+        const h = document.querySelector('header');
+        if (h) document.documentElement.style.setProperty('--hdr', h.offsetHeight + 'px');
+      };
+      syncHdr();
+      window.addEventListener('resize', syncHdr);
+
       const data = await (await fetch('/api/population/data')).json();
       this.needs      = data.needs;
       this.families   = data.families || [];
@@ -1158,6 +1189,11 @@ function populationCalc() {
       return [...out, ...Object.values(by)];
     },
     toggleSection(key) { this.collapsed[key] = !this.collapsed[key]; this.save(); },
+    // Позиционирование на раздел из навигации.
+    jumpTo(key) {
+      const el = document.querySelector('main section[data-key="' + key + '"]');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
     // В «Доп. производстве» каждая корневая цепочка живёт в своей рамке,
     // остальные разделы — сплошным списком, как раньше.
     rowFrames(sec) {
