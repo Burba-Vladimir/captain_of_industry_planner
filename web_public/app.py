@@ -1408,7 +1408,7 @@ def api_population_data():
     # из водорода: ферментёр гонит его из тростника и кукурузы, то есть из
     # того, что уже растёт на полях. Поэтому он — такой же корень цепочки,
     # как мак, с развилкой по сырью.
-    CHAIN_EXTRA_ROOTS = ("Poppy", "Sugar", "Ethanol", "Food Pack")
+    CHAIN_EXTRA_ROOTS = ("Poppy", "Sugar", "Ethanol", "Food Pack", "Cooking Oil")
     # Пайки делают на сборочной линии, а не на пищевом здании, но по сути
     # это такой же продукт цепочки: он потребляет готовую еду. Этанол так же:
     # ферментёр и химзавод в пищевые здания не входят.
@@ -1452,6 +1452,47 @@ def api_population_data():
         if names and names <= {"Air Pollution"}:
             return "burn"
         return None
+
+    # Указы Ратуши (Captain's Office). Уровни включаются по порядку и
+    # складываются: «Экономия еды II» работает вместе с I, то есть −30 %.
+    # Каждый уровень стоит 1 Единство в месяц.
+    # Здесь только те, что меняют наши расчёты; рост населения, карантин,
+    # топливо машин, солнечные панели и исследования на план не влияют.
+    EDICTS = [
+        {"key": "food_saver",      "effect": "food",       "levels": [-0.20, -0.10]},
+        # «Изобилие еды» — единственный указ, который Единство даёт, а не тратит:
+        # по +1 за уровень в месяц.
+        {"key": "plenty_of_food",  "effect": "food",       "levels": [0.20, 0.20], "unity_gain": 1},
+        {"key": "more_goods",      "effect": "item",       "item": "Household Goods",
+         "levels": [0.20, 0.20, 0.30], "unity_bonus": 0.15},
+        {"key": "more_appliances", "effect": "item",       "item": "Household Appliances",
+         "levels": [0.20, 0.20, 0.30], "unity_bonus": 0.15},
+        {"key": "more_electronics", "effect": "item",      "item": "Consumer Electronics",
+         "levels": [0.20, 0.20, 0.30], "unity_bonus": 0.15},
+        # Урожайность растёт вместе с расходом воды на те же проценты.
+        {"key": "farming_boost",   "effect": "farm_yield", "levels": [0.15, 0.12, 0.08]},
+        # Вода экономится и в поселении, и на фермах.
+        {"key": "water_saver",     "effect": "water",      "levels": [0.15, 0.12, 0.08]},
+    ]
+
+    # Фокус Офиса (Office I–III). Офисы копят фокус из рабочих и канцтоваров,
+    # а накопленным фокусом разово покупаются постоянные бонусы — цена уровня
+    # растёт с каждым следующим. Здесь только те бонусы, что меняют расчёты
+    # поселения: потребление еды, потребление товаров, урожайность полей и
+    # производство Единства. Остальные (грузовики, поезда, контракты, шахты,
+    # исследования, переработка, обслуживание) на нужды поселения не влияют.
+    # per_level — эффект одного уровня, initial/increment — цена первого и
+    # всех последующих уровней в фокусе.
+    FOCUSES = [
+        {"key": "focus_food",  "effect": "food",       "levels": 15,
+         "per_level": -0.02, "initial": 75,  "increment": 100},
+        {"key": "focus_goods", "effect": "goods",      "levels": 25,
+         "per_level": -0.02, "initial": 125, "increment": 125},
+        {"key": "focus_crop",  "effect": "farm_yield", "levels": 50,
+         "per_level": 0.02,  "initial": 50,  "increment": 10},
+        {"key": "focus_unity", "effect": "unity",      "levels": 14,
+         "per_level": 0.025, "initial": 250, "increment": 250},
+    ]
 
     # Выбор по умолчанию: (предмет, здание, обязательный вход или None).
     PREFERRED = [
@@ -1977,6 +2018,8 @@ def api_population_data():
         "disposal":        disposal,
         "base_population": 10000,
         "grown_items":     grown_items,
+        "edicts":          EDICTS,
+        "focuses":         FOCUSES,
         "prefs":           prefs,
     })
 
