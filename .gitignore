@@ -61,3 +61,9 @@ pending_update.sql
 
 # Local-only: not for GitHub
 /_archive/
+
+# Agent memory — local only
+.clinerules
+web_public/.clinerules
+CLAUDE.md
+web_public/CLAUDE.md
