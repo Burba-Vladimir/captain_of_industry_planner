@@ -1489,7 +1489,7 @@ def api_population_data():
          "per_level": -0.02, "initial": 75,  "increment": 100},
         {"key": "focus_goods", "effect": "goods",      "levels": 25,
          "per_level": -0.02, "initial": 125, "increment": 125},
-        {"key": "focus_crop",  "effect": "farm_yield", "levels": 150,
+        {"key": "focus_crop",  "effect": "farm_yield", "levels": 50,
          "per_level": 0.02,  "initial": 50,  "increment": 10},
         {"key": "focus_unity", "effect": "unity",      "levels": 14,
          "per_level": 0.025, "initial": 250, "increment": 250},

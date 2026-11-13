@@ -376,5 +376,5 @@ def test_edicts_and_focuses_catalogs(client):
     assert ff["per_level"] == -0.02
     assert ff["initial"] == 75 and ff["increment"] == 100
     fc = focuses["focus_crop"]
-    assert fc["levels"] == 150 and fc["per_level"] == 0.02
+    assert fc["levels"] == 50 and fc["per_level"] == 0.02
     assert fc["initial"] == 50 and fc["increment"] == 10

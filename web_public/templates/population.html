@@ -253,7 +253,7 @@
     </div>
 
     <!-- Бонусы Офиса покупаются накопленным фокусом. Уровней много
-         (у урожая — 150), поэтому не список, а число. -->
+         (у урожая — 50), поэтому не список, а число. -->
     <div x-show="focusList.length">
       <button type="button" @click="focusOpen = !focusOpen"
               class="w-full flex items-center gap-1.5 text-xs font-semibold uppercase
@@ -263,6 +263,9 @@
           <path d="M4 6.5h12L10 14z"></path>
         </svg>
         {{ t('population.focus') }}
+        <span x-show="focusCost > 0"
+              class="ml-auto normal-case font-semibold text-amber-600 dark:text-amber-400 tabular-nums"
+              x-text="fmt(focusCost, 0) + ' · ' + focusOffices + ' ' + (_popI18n.offices || '')"></span>
       </button>
       <div x-show="focusOpen" class="space-y-1.5 mb-1">
         <template x-for="f in focusList" :key="f.key">
@@ -599,48 +602,59 @@
                 </template>
               </div>
             </template>
+
+            <!-- Доп. производство: краткое упоминание. Полная расшифровка
+                 уже была выше по цепочке — здесь чип и куда сколько ушло. -->
+            <template x-if="sec.brief && sec.brief.length">
+              <div class="px-3 py-2.5 border-t border-slate-100 dark:border-slate-700">
+                <div class="flex flex-wrap gap-2">
+                  <template x-for="i in sec.brief" :key="'xb-' + i.item">
+                    <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-sm whitespace-nowrap
+                                 border-emerald-300 bg-emerald-50 dark:bg-emerald-900/25 dark:border-emerald-700">
+                      <img :src="iconOf(i.item)" alt="" class="w-4 h-4" @error="$el.style.display='none'">
+                      <span x-text="i.item_display"></span>
+                      <span class="tabular-nums font-semibold" x-text="fmt(i.qty, 2)"></span>
+                    </span>
+                  </template>
+                </div>
+                <template x-for="d in sec.brief" :key="'xd-' + d.item">
+                  <div class="mt-3 max-w-xl text-sm pl-3 border-l-2 border-emerald-300 dark:border-emerald-700">
+                    <div class="flex items-center gap-1.5 font-semibold mb-0.5">
+                      <img :src="iconOf(d.item)" alt="" class="w-4 h-4 shrink-0" @error="$el.style.display='none'">
+                      <span x-text="d.item_display"></span>
+                      <span class="tabular-nums font-normal text-slate-500 dark:text-slate-400"
+                            x-text="fmt(d.made, 2) + ' ' + unitLabel('per_min')"></span>
+                    </div>
+                    <template x-for="l in d.dests" :key="d.item + '-' + l.label">
+                      <div class="flex justify-between gap-4 py-0.5 border-b border-dashed
+                                  border-slate-100 dark:border-slate-700">
+                        <span :class="l.out ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : ''"
+                              x-text="l.label"></span>
+                        <span class="tabular-nums shrink-0" x-text="fmt(l.qty, 2)"></span>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
             </div>
           </template>
 
           <!-- Плитки сводки -->
           <template x-if="sec.type === 'chips'">
-          <div class="p-3">
-            <div class="flex flex-wrap gap-2">
-              <template x-for="i in sec.items" :key="i.item || i.item_display">
-                <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-sm whitespace-nowrap"
-                      :class="sec.key === 'outputs' ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/25 dark:border-emerald-700'
-                                                    : 'border-slate-200 dark:border-slate-600'">
-                  <template x-if="i.item">
-                    <img :src="iconOf(i.item)" alt="" class="w-4 h-4" @error="$el.style.display='none'">
-                  </template>
-                  <span x-text="i.item_display"></span>
-                  <template x-if="!i.unknown">
-                    <span class="tabular-nums font-semibold" x-text="fmt(i.qty, 2)"></span>
-                  </template>
-                </span>
-              </template>
-            </div>
-
-            <!-- Доп. производство: куда сколько ушло. Расшифровка в том же
-                 стиле, что и происхождение потребности у строк цепочки. -->
-            <template x-for="d in sec.items.filter(i => (i.dests || []).length)"
-                      :key="'dests-' + d.item">
-              <div class="mt-3 max-w-xl text-sm pl-3 border-l-2 border-emerald-300 dark:border-emerald-700">
-                <div class="flex items-center gap-1.5 font-semibold mb-0.5">
-                  <img :src="iconOf(d.item)" alt="" class="w-4 h-4 shrink-0" @error="$el.style.display='none'">
-                  <span x-text="d.item_display"></span>
-                  <span class="tabular-nums font-normal text-slate-500 dark:text-slate-400"
-                        x-text="fmt(d.made, 2) + ' ' + unitLabel('per_min')"></span>
-                </div>
-                <template x-for="l in d.dests" :key="d.item + '-' + l.label">
-                  <div class="flex justify-between gap-4 py-0.5 border-b border-dashed
-                              border-slate-100 dark:border-slate-700">
-                    <span :class="l.out ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : ''"
-                          x-text="l.label"></span>
-                    <span class="tabular-nums shrink-0" x-text="fmt(l.qty, 2)"></span>
-                  </div>
+          <div class="p-3 flex flex-wrap gap-2">
+            <template x-for="i in sec.items" :key="i.item || i.item_display">
+              <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-sm whitespace-nowrap"
+                    :class="sec.key === 'outputs' ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/25 dark:border-emerald-700'
+                                                  : 'border-slate-200 dark:border-slate-600'">
+                <template x-if="i.item">
+                  <img :src="iconOf(i.item)" alt="" class="w-4 h-4" @error="$el.style.display='none'">
                 </template>
-              </div>
+                <span x-text="i.item_display"></span>
+                <template x-if="!i.unknown">
+                  <span class="tabular-nums font-semibold" x-text="fmt(i.qty, 2)"></span>
+                </template>
+              </span>
             </template>
           </div>
           </template>
@@ -657,7 +671,7 @@
                     </template>
                     <span class="truncate" x-text="l.label" :title="l.label"></span>
                   </span>
-                  <span class="tabular-nums shrink-0" x-text="'+' + fmt(l.value, 2)"></span>
+                  <span class="tabular-nums shrink-0" x-text="l.text || ('+' + fmt(l.value, 2))"></span>
                 </div>
               </template>
               <div class="pt-2 space-y-1 text-sm">
@@ -960,7 +974,7 @@ function populationCalc() {
     fertilizer: null, // выбранное удобрение (одно на все фермы)
     enabled:    {},   // need.id -> считать
     medicine:   null,
-    sectionOrder: ['grown', 'food', 'fertilizer', 'utility',
+    sectionOrder: ['grown', 'food', 'extras', 'fertilizer', 'utility',
                    'health', 'goods', 'unity', 'industrial', 'outputs'],
     dispChoice: {},   // способ переработки -> выбранное здание
     collapsed:  {},   // ключ раздела -> свёрнут
@@ -1122,6 +1136,9 @@ function populationCalc() {
                    type: 'unity', filled: this.unity.lines.length > 0 };
       const out = [];
       for (const k of this.sectionOrder) if (by[k]) { out.push(by[k]); delete by[k]; }
+      // «Доп. производство» живёт и карточками, и краткими чипами.
+      if (by.extras) by.extras.filled = by.extras.filled
+                                    || (by.extras.brief || []).length > 0;
       return [...out, ...Object.values(by)];
     },
     toggleSection(key) { this.collapsed[key] = !this.collapsed[key]; this.save(); },
@@ -1444,6 +1461,21 @@ function populationCalc() {
       this.applyEdicts();
       this.save();
     },
+    // Суммарная стоимость уровней: P·n + k·n·(n−1)/2 — цена уровня
+    // растёт прогрессивно, каждый уровень прибавляет столько же, сколько
+    // предыдущий.
+    focusCostOf(f, lvl) {
+      const L = Math.max(0, Math.min(Number(lvl) || 0, f.levels));
+      return L * f.initial + f.increment * L * (L - 1) / 2;
+    },
+    get focusCost() {
+      return this.focusList.reduce(
+        (a, f) => a + this.focusCostOf(f, Number(this.focus[f.key]) || 0), 0);
+    },
+    // Один офис при полной прокачке даёт 1500 фокуса.
+    get focusOffices() {
+      return this.focusCost > 0 ? Math.ceil(this.focusCost / 1500) : 0;
+    },
     // Сколько позиций доп. производства задано — бейдж в заголовке блока.
     get extrasCount() {
       return [this.woodNeed, this.packNeed, this.oilNeed, this.ethanolNeed]
@@ -1491,11 +1523,21 @@ function populationCalc() {
     UNITY_SERVICE: {
       'Electricity': 1.20, 'Water': 1.00, 'Household Goods': 1.40,
       'Household Appliances': 1.40, 'Luxury Goods': 1.00,
-      'Consumer Electronics': 1.80, 'Computing': 1.00,
+      'Consumer Electronics': 1.40, 'Computing': 1.00,
     },
     UNITY_MEDICINE: {
       'Medical Supplies': 0.50, 'Medical Supplies II': 0.75,
-      'Medical Supplies III': 1.20,
+      'Medical Supplies III': 1.00,
+    },
+    // Ступень бонуса жилья — не выбор, а факт: считается по тому, что
+    // поселение реально обеспечено. Вода требует и отвода стоков.
+    get housingBonus() {
+      if (!(this.needOn('Electricity')
+            && this.needOn('Water') && this.needOn('Waste Water'))) return 0;
+      if (this.needOn('Consumer Electronics')) return 1.25;
+      if (this.needOn('Household Appliances')) return 1.00;
+      if (this.needOn('Household Goods')) return 0.75;
+      return 0.50;
     },
     // Потребность включена и активна (лекарства — только выбранного уровня).
     needOn(item) {
@@ -1504,16 +1546,20 @@ function populationCalc() {
     },
     get unity() {
       const fx = this.edictFx;
+      const H = this.housingBonus;
       const raw = [];
+      raw.push({ label: (window._popI18n || {}).unity_housing,
+                 text: '+' + Math.round(H * 100) + '%' });
       // Еда: базовая услуга 1.00 плюс строчка за каждый вид еды.
+      // Бонус жилья умножает базу и услуги, но не отдельные продукты.
       const foods = this.needs.filter(n =>
         n.group_key === 'food' && this.needOn(n.item) && this.baseQty(n) > 1e-9);
       if (foods.length) {
-        raw.push({ label: (window._popI18n || {}).unity_food_base, v: 1.00 });
+        raw.push({ label: (window._popI18n || {}).unity_food_base, v: 1.00, boosted: true });
       }
       const variety = foods.reduce((a, n) => a + (this.UNITY_FOOD[n.item] || 0), 0);
       if (variety > 0) {
-        raw.push({ label: (window._popI18n || {}).unity_variety, v: variety });
+        raw.push({ label: (window._popI18n || {}).unity_variety, v: variety, variety: true });
       }
       // Бонус к Единству привязан к заработку своего ресурса: указы
       // «Больше …» поднимают Единство своей услуги на 15% за уровень.
@@ -1534,12 +1580,12 @@ function populationCalc() {
           v *= 1 + lvl * ((e && e.unity_bonus) || 0);
         }
         raw.push({ label: this.needName(this.needs.find(x => x.item === item)),
-                   icon: item, v });
+                   icon: item, v, boosted: true });
       }
       const med = this.needs.find(n => n.choice_group === 'medicine' && n.id === this.medicine);
       if (med && this.needOn(med.item)) {
         raw.push({ label: this.needName(med), icon: med.item,
-                   v: this.UNITY_MEDICINE[med.item] || 0 });
+                   v: this.UNITY_MEDICINE[med.item] || 0, boosted: true });
       }
       // «Изобилие еды» — единственный указ-производитель: +1 за уровень.
       if (fx.gain > 0) {
@@ -1547,11 +1593,15 @@ function populationCalc() {
                    v: fx.gain, flat: true });
       }
       const scale = this.population / 1000;
-      const per1000 = raw.reduce((a, l) => a + (l.flat ? 0 : l.v), 0);
-      const production = per1000 * scale * fx.unity + fx.gain;
+      let boosted = 0, extra = 0;
+      for (const l of raw) {
+        if (l.boosted) boosted += l.v;
+        else if (l.variety) extra += l.v;
+      }
+      const production = (boosted * (1 + H) + extra) * scale * fx.unity + fx.gain;
       const lines = raw.map(l => ({
-        label: l.label, icon: l.icon || null,
-        value: l.flat ? l.v : l.v * scale * fx.unity,
+        label: l.label, icon: l.icon || null, text: l.text || null,
+        value: l.text ? 0 : (l.flat ? l.v : l.v * (l.boosted ? 1 + H : 1) * scale * fx.unity),
       }));
       const costs = fx.cost;
       return { lines, production, costs, net: production - costs };
@@ -2752,7 +2802,8 @@ function populationCalc() {
       // Заголовок подраздела вешаем на первую строку пайков.
       const packRows = (fp.packs || []).map((r, i) =>
         i === 0 ? { ...r, subTitle: '{{ t('population.packs') }}' } : r);
-      const food = [...fp.tree, ...packRows];
+      // Пайки — гости «Еды»: живут в «Доп. производстве».
+      const food = [...fp.tree];
 
       const waste = [];
       for (const n of this.needs) {
@@ -2867,11 +2918,26 @@ function populationCalc() {
         }),
       });
 
+      // ── Доп. производство: заготовка ─────────────────────────────
+      // Пайки и саженцы — карточками. Масло и этанол — карточками, если
+      // в «Еде»/«Медикаментах» не встретились; иначе там расписаны,
+      // а здесь кратко: чип и расшифровка «куда сколько ушло».
+      const extrasLbl = '{{ t('population.extra_source') }}';
+      const extrasRows = [...sapRows, ...packRows];
+      const extraRoot = (root) => {
+        if (!['Cooking Oil', 'Ethanol'].includes(root.item)) return false;
+        const want = root.item === 'Cooking Oil' ? this.oilNeed : this.ethanolNeed;
+        return want > 1e-9
+            && !(root.parts || []).some(p => p.label !== extrasLbl);
+      };
+
       // Мак и тростник растут ради лекарств. Ставим их не отдельным корнем
       // в конце, а под тем узлом, который их потребляет.
       const health = [...medicine];
       for (const branch of this.splitRoots(fp.extra || [])) {
         const root = branch[0];
+        // Масло и этанол «под заказ» без внутреннего спроса живут здесь.
+        if (extraRoot(root)) { extrasRows.push(...branch); continue; }
         const at = health.findIndex(m => m.opt && !m.off
                                       && m.opt.inputs.some(i => i.item === root.item));
         if (at < 0) { health.push(...branch); continue; }
@@ -2881,8 +2947,76 @@ function populationCalc() {
         health.splice(at + 1, 0, ...branch.map(r => ({ ...r, level: r.level + base })));
       }
 
+      // ── Доп. производство: краткие чипы ──────────────────────────
+      // Масло и этанол, встретившиеся в «Еде», здесь только упоминаются.
+      for (const it of ['Cooking Oil', 'Ethanol']) {
+        const want = it === 'Cooking Oil' ? this.oilNeed : this.ethanolNeed;
+        if (!(want > 1e-9)) continue;
+        const rowsIt = food.filter(r => r.item === it && !r.off);
+        if (!rowsIt.length) continue;
+        const internal = rowsIt.some(r => (r.parts || []).some(p => p.label !== extrasLbl));
+        if (!internal) {
+          for (const r of rowsIt) food.splice(food.indexOf(r), 1);
+          extrasRows.push(...rowsIt);
+        }
+      }
+      const allRows = [...base, computing, ...compChain, water, elec].filter(Boolean);
+      const dispOf = (name) => {
+        for (const r of allRows) for (const i of (r.inputs || []))
+          if (i.item === name && i.item_display) return i.item_display;
+        return name;
+      };
+      const consumersOf = (name) => {
+        const list = [];
+        for (const r of allRows) {
+          if (r.off || r.item === name) continue;
+          for (const i of (r.inputs || [])) {
+            if (i.item !== name || !(i.qty > 1e-9)) continue;
+            const cur = list.find(x => x.label === r.item_display);
+            if (cur) cur.qty += i.qty;
+            else list.push({ label: r.item_display, qty: i.qty });
+          }
+        }
+        return list.sort((a, b) => b.qty - a.qty);
+      };
+      const madeOf = (name) => {
+        let qty = 0, disp = name;
+        for (const r of allRows) {
+          if (r.item !== name || r.off) continue;
+          qty += r.qty || 0;
+          disp = r.item_display || name;
+        }
+        return { qty, disp };
+      };
+      const extrasBrief = [];
+      if (this.woodNeed > 1e-9) {
+        const cons = consumersOf('Wood');
+        const used = cons.reduce((a, c) => a + c.qty, 0);
+        const left = this.woodNeed - used;
+        if (left > 1e-9) {
+          cons.push({ label: '{{ t('population.to_output') }}', qty: left, out: true });
+          extrasBrief.push({ item: 'Wood', item_display: dispOf('Wood'), qty: left,
+                             made: this.woodNeed, dests: cons });
+        }
+      }
+      for (const it of ['Cooking Oil', 'Ethanol']) {
+        const want = it === 'Cooking Oil' ? this.oilNeed : this.ethanolNeed;
+        if (!(want > 1e-9)) continue;
+        const made = madeOf(it);
+        const cons = consumersOf(it);
+        const left = made.qty - cons.reduce((a, c) => a + c.qty, 0);
+        if (left > 1e-9) {
+          cons.push({ label: '{{ t('population.to_output') }}', qty: left, out: true });
+          extrasBrief.push({ item: it, item_display: made.disp, qty: left,
+                             made: made.qty, dests: cons });
+        }
+      }
+      const extras = mkSection('extras', '{{ t('population.extras') }}', extrasRows);
+      extras.brief = extrasBrief;
+
       const sections = [
         mkSection('food',    '{{ t('population.group_food') }}',    food),
+        extras,
         mkSection('health',  '{{ t('population.medicine_tree') }}', health),
         mkSection('goods',   '{{ t('population.group_goods') }}',   goods),
         mkSection('utility', '{{ t('population.group_utility') }}', utilFlat),
@@ -2890,7 +3024,7 @@ function populationCalc() {
       ];
 
       return { food, foodInfo: fp, medicine, goods, waste, utility, sections,
-               all: [...base, computing, ...compChain, water, elec].filter(Boolean) };
+               all: allRows };
     },
 
     // Плоский список строк с уровнями режем на поддеревья по корням.
@@ -3602,9 +3736,6 @@ function populationCalc() {
         const key = i.item || i.item_display;
         if (!bag[key]) bag[key] = { item: i.item, item_display: i.item_display, qty: 0, unknown: false };
         if (i.qty === null) bag[key].unknown = true; else bag[key].qty += i.qty;
-        // Расшифровка «куда сколько ушло» живёт на чипе доп. производства.
-        if (i.made !== undefined) bag[key].made = i.made;
-        if (i.dests) bag[key].dests = i.dests;
       };
       const plan = this.plan;
       const rows = plan.all;
@@ -3660,55 +3791,13 @@ function populationCalc() {
         add(out, { item: r.item, item_display: r.item_display, qty: r.qty });
         for (const o of (r.byproducts || [])) add(out, o);
       }
-      // Древесина, масло и этанол: производство «под заказ» — саженцы,
-      // мельницы и ферментёры. Внутренний расход расписываем по
-      // потребителям, излишек уходит «на выход».
-      const consumersOf = (name) => {
-        const list = [];
-        for (const r of rows) {
-          if (r.off || r.item === name) continue;
-          for (const i of (r.inputs || [])) {
-            if (i.item !== name || !(i.qty > 1e-9)) continue;
-            const cur = list.find(x => x.label === r.item_display);
-            if (cur) cur.qty += i.qty;
-            else list.push({ label: r.item_display, qty: i.qty });
-          }
-        }
-        return list.sort((a, b) => b.qty - a.qty);
-      };
-      const madeOf = (name) => {
-        let qty = 0, disp = name;
-        for (const r of rows) {
-          if (r.item !== name || r.off) continue;
-          qty += r.qty || 0;
-          disp = r.item_display || name;
-        }
-        return { qty, disp };
-      };
+      // Древесину растим сами: недостающее покупаем. Излишек и расшифровка
+      // «куда сколько ушло» — в разделе «Доп. производство».
       const wood = this.woodNeed;
-      if (wood > 1e-9) {
-        const cons = consumersOf('Wood');
-        const used = cons.reduce((a, c) => a + c.qty, 0);
-        const disp = (ind['Wood'] || {}).item_display || 'Wood';
+      if (wood > 1e-9 && ind['Wood']) {
+        const used = ind['Wood'].qty, disp = ind['Wood'].item_display;
         delete ind['Wood'];
-        if (wood > used + 1e-9) {
-          const left = wood - used;
-          cons.push({ label: '{{ t('population.to_output') }}', qty: left, out: true });
-          add(out, { item: 'Wood', item_display: disp, qty: left, made: wood, dests: cons });
-        } else if (used > wood + 1e-9) {
-          add(ind, { item: 'Wood', item_display: disp, qty: used - wood });
-        }
-      }
-      for (const it of ['Cooking Oil', 'Ethanol']) {
-        const want = it === 'Cooking Oil' ? this.oilNeed : this.ethanolNeed;
-        if (!(want > 1e-9)) continue;
-        const made = madeOf(it);
-        const cons = consumersOf(it);
-        const left = made.qty - cons.reduce((a, c) => a + c.qty, 0);
-        if (left > 1e-9) {
-          cons.push({ label: '{{ t('population.to_output') }}', qty: left, out: true });
-          add(out, { item: it, item_display: made.disp, qty: left, made: made.qty, dests: cons });
-        }
+        if (used > wood + 1e-9) add(ind, { item: 'Wood', item_display: disp, qty: used - wood });
       }
       // Что из этого забрали удобрения, на выходе уже не лежит.
       for (const r of rows) {
