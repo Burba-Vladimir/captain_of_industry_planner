@@ -1034,11 +1034,21 @@ function populationCalc() {
       if (p.oilNeed)    this.oilNeed = p.oilNeed;
       if (p.ethanolNeed) this.ethanolNeed = p.ethanolNeed;
       if (Array.isArray(p.sectionOrder) && p.sectionOrder.length) {
-        // Порядок мог устареть: добавился раздел или исчез. Берём известные
-        // ключи из сохранённого порядка, остальные дописываем следом.
+        // Порядок мог устареть: добавился раздел или исчез. Сохранённые
+        // ключи берём как есть, а новые вставляем на их место по умолчанию —
+        // иначе раздел у пользователей со старыми настройками уезжал в конец.
         const known = this.sectionOrder;
-        this.sectionOrder = [...p.sectionOrder.filter(k => known.includes(k)),
-                             ...known.filter(k => !p.sectionOrder.includes(k))];
+        const saved = p.sectionOrder.filter(k => known.includes(k));
+        const order = [...saved];
+        for (const m of known.filter(k => !saved.includes(k))) {
+          let at = order.length;
+          for (let i = known.indexOf(m) - 1; i >= 0; i--) {
+            const j = order.indexOf(known[i]);
+            if (j >= 0) { at = j + 1; break; }
+          }
+          order.splice(at, 0, m);
+        }
+        this.sectionOrder = order;
       }
       if ('medicine' in p) this.medicine = p.medicine;
 

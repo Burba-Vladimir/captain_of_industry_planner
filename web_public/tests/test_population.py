@@ -353,6 +353,20 @@ def test_food_is_no_longer_hidden(client, db_conn):
             cur.execute("DELETE FROM population_needs WHERE label = 'ТестЕда'")
 
 
+def test_population_ru_page_has_new_blocks(client):
+    """Русская версия страницы несёт словари новых блоков: указы, допы,
+    Офис и Единство. Проверяем по ключам во встроенном _popI18n —
+    на чистой схеме в CI игровых данных нет, а словарь статичен.
+    """
+    r = client.get("/population?lang=ru")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    for key in ("edict_plenty_of_food", "extras", "extra_source",
+                "focus_food", "focus_unity", "unity_housing",
+                "unity_food_base", "unity_net", "offices", "to_output"):
+        assert key in body, f"нет ключа {key} в русской версии"
+
+
 def test_edicts_and_focuses_catalogs(client):
     """Каталоги указов и фокусов Офиса приходят целиком.
 
