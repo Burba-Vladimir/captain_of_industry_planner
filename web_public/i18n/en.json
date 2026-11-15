@@ -319,7 +319,7 @@
     "ethanol_need": "Ethanol, units/min",
     "focus": "Office",
     "focus_food": "Food consumption",
-    "focus_goods": "Goods consumption",
+    "focus_goods": "Goods & services consumption",
     "focus_crop": "Crop yield",
     "focus_unity": "Unity generation",
     "unity": "Unity",

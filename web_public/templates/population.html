@@ -1510,11 +1510,14 @@ function populationCalc() {
       };
       // Фокус складывается с указами: обе шкалы — проценты от исходных чисел.
       const foodFx  = fLvl('focus_food')  * -0.02;   // «Потребление еды»
-      const goodsFx = fLvl('focus_goods') * -0.02;   // «Потребление товаров»
+      const goodsFx = fLvl('focus_goods') * -0.02;   // «Потребление товаров и услуг»
       const cropFx  = fLvl('focus_crop')  *  0.02;   // «Урожайность полей»
       // У «Экономии еды» уровни заданы отрицательными, поэтому просто сумма.
       const yieldK = 1 + sum('farming_boost') + cropFx;
       const waterK = 1 - sum('water_saver');
+      // Фокус «Потребление товаров и услуг» действует и на услуги поселения:
+      // воду, лекарства, электричество и вычислительные ресурсы.
+      const servicesK = 1 + goodsFx;
       return {
         food:  1 + sum('food_saver') + sum('plenty_of_food') + foodFx,
         item: {
@@ -1526,7 +1529,9 @@ function populationCalc() {
         farmYield:   yieldK,
         // Урожайность тянет за собой полив, экономия воды его снижает.
         farmWater:   yieldK * waterK,
-        water:       waterK,
+        // Вода поселения: экономия воды и фокус Офиса. Стоки пропорциональны воде.
+        water:       waterK * servicesK,
+        services:    servicesK,
         maintenance: 1 - sum('maintenance_reducer'),
         // Фокус «Производство Единства»: +2,5% за уровень ко всему производству.
         unity:       1 + fLvl('focus_unity') * 0.025,
@@ -1717,11 +1722,16 @@ function populationCalc() {
 
     baseQty(n) {
       const fx = this.edictFx;
-      // Еда и три вида товаров меняются указами, вода — «Экономией воды».
+      // Еда и товары меняются указами и Офисом, вода — «Экономией воды»
+      // и Офисом. Стоки пропорциональны потреблению воды. Офисный фокус
+      // «Потребление товаров и услуг» снижает и услуги: лекарства,
+      // электричество и вычислительные ресурсы.
       let k = 1;
       if (n.group_key === 'food') k = fx.food;
       else if (fx.item[n.item] !== undefined) k = fx.item[n.item];
-      else if (n.item === 'Water') k = fx.water;
+      else if (n.item === 'Water' || n.item === 'Waste Water') k = fx.water;
+      else if (n.item === 'Electricity' || n.item === 'Computing'
+               || n.choice_group === 'medicine') k = fx.services;
       if (n.food_group) {
         const sh = this.foodShares[n.id];
         return sh ? sh.qty10k * k * this.population / 10000 : 0;
